@@ -64,6 +64,9 @@ class MasGeospatialProvider(QgsProcessingProvider):
         load_alg('.algorithms.stream_network.stream_cleaning', 'StreamCleaningAlgorithm')
         load_alg('.algorithms.stream_network.valley_extraction', 'ValleyExtractionAlgorithm')
         load_alg('.algorithms.stream_network.join_stream_links', 'JoinStreamLinksAlgorithm')
+        load_alg('.algorithms.stream_network.raster_to_vector_streams', 'RasterToVectorStreamsAlgorithm')
+        load_alg('.algorithms.stream_network.clean_vector_streams', 'CleanVectorStreamsAlgorithm')
+        load_alg('.algorithms.stream_network.connect_vector_streams', 'ConnectVectorStreamsAlgorithm')
 
         # Structured Hydrology
         load_alg('.algorithms.hydrology_struct.structured_tools', 'StructBasinAlgorithm')
@@ -103,4 +106,4 @@ class MasGeospatialProvider(QgsProcessingProvider):
 
     def icon(self):
         """Return provider icon."""
-        return QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'mas_icon.svg'))
+        return QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'mas_icon.png'))

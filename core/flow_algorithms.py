@@ -252,7 +252,7 @@ def _d8_flow_direction_numba(dem, nodata_val, cellsize_x, cellsize_y):
     rows, cols = dem.shape
     flow_dir = np.zeros((rows, cols), dtype=np.int32)
     
-    # Directions: E, SE, S, SW, W, NW, N, NE (index order)
+    # Standard Directions: E, SE, S, SW, W, NW, N, NE (Ascending Codes 1..128)
     drs = np.array([0, 1, 1, 1, 0, -1, -1, -1])
     dcs = np.array([1, 1, 0, -1, -1, -1, 0, 1])
     codes = np.array([1, 2, 4, 8, 16, 32, 64, 128])
@@ -276,6 +276,7 @@ def _d8_flow_direction_numba(dem, nodata_val, cellsize_x, cellsize_y):
             for i in range(8):
                 nr, nc = r + drs[i], c + dcs[i]
                 
+                # Handle boundaries
                 if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
                     continue
                 
@@ -292,16 +293,24 @@ def _d8_flow_direction_numba(dem, nodata_val, cellsize_x, cellsize_y):
                     lowest_direction = codes[i]
                 
                 # Select steepest slope
+                # Standard Logic: Prefer first found max (Strict >)
+                # Order is E -> SE -> S -> SW -> W -> NW -> N -> NE
                 if slope > max_slope:
                     max_slope = slope
                     direction = codes[i]
             
-            # For flat areas (no positive slope), use lowest neighbor
-            if max_slope <= 0 and lowest_direction != 0:
-                direction = lowest_direction
+            # Handling sinks (no positive slope) and flat areas
+            if max_slope <= 0:
+                # Flow to lowest neighbor if possible (Fill behavior)
+                if lowest_direction != 0:
+                    direction = lowest_direction
+                
+                # Edge Sink Handling removed as per user request
+                # "no need to calculate flow direction values for edge pixels"
+                # They will remain 0 (or lowest neighbor if found)
             
             flow_dir[r, c] = direction
-                    
+            
     return flow_dir
 
 @jit(nopython=True, cache=True)
@@ -1459,6 +1468,28 @@ def _flow_distance_to_outlet_numba(flow_dir, codes, drs, dcs, cellsize_x, cellsi
         """
         return self.assign_stream_link_ids(flow_dir, streams)
 
+    def join_stream_gaps(self, streams, gap_threshold):
+        """Join gaps in stream network (raster).
+        
+        Args:
+            streams (np.ndarray): Binary stream raster
+            gap_threshold (float): Max gap distance in map units
+            
+        Returns:
+            np.ndarray: Filled stream raster
+        """
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+             raise ValueError("Flow direction required for gap joining")
+             
+        return _join_stream_gaps_numba(
+            streams.astype(np.int8),
+            self.flow_dir.astype(np.int32),
+            self.codes, self.drs, self.dcs,
+            self.cellsize_x, self.cellsize_y,
+            gap_threshold
+        )
+
+
     def snap_pour_points(self, points, flow_acc, snap_dist):
         """Snap pour points to high accumulation cells.
         
@@ -2392,10 +2423,86 @@ def _flow_distance_upstream_numba(flow_dir, codes, drs, dcs, cellsize_x, cellsiz
                         if new_dist > dist[nr, nc]:
                             dist[nr, nc] = new_dist
                             
+                        # Decrement inflow count
                         inflow_count[nr, nc] -= 1
                         if inflow_count[nr, nc] == 0:
                             queue[tail] = nr * cols + nc
                             tail += 1
-                    break
-                    
+                        break
+                        
     return dist
+
+@jit(nopython=True, cache=True)
+def _join_stream_gaps_numba(streams, flow_dir, codes, drs, dcs, cellsize_x, cellsize_y, gap_threshold):
+    """Join gaps in stream network by tracing downstream."""
+    rows, cols = streams.shape
+    filled_streams = streams.copy()
+    
+    diag_dist = np.sqrt(cellsize_x**2 + cellsize_y**2)
+    
+    # 1. Identify "endpoints" - stream cells that flow into NON-stream cells
+    # We scan all stream cells.
+    
+    for r in range(rows):
+        for c in range(cols):
+            if streams[r, c] > 0:
+                d = flow_dir[r, c]
+                is_endpoint = False
+                if d > 0:
+                    for i in range(8):
+                        if d == codes[i]:
+                            nr, nc = r + drs[i], c + dcs[i]
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                if streams[nr, nc] == 0:
+                                    is_endpoint = True
+                            break
+                            
+                if is_endpoint:
+                    # Trace downstream
+                    curr_r, curr_c = r, c
+                    accum_dist = 0.0
+                    path_r = []
+                    path_c = []
+                    
+                    found_connection = False
+                    
+                    while accum_dist < gap_threshold:
+                        curr_d = flow_dir[curr_r, curr_c]
+                        if curr_d <= 0:
+                            break # Reached edge or sink
+                            
+                        # Move downstream
+                        next_r, next_c = -1, -1
+                        step_dist = 0.0
+                        
+                        for i in range(8):
+                            if curr_d == codes[i]:
+                                next_r, next_c = curr_r + drs[i], curr_c + dcs[i]
+                                step_dist = diag_dist if (drs[i] != 0 and dcs[i] != 0) else cellsize_x
+                                break
+                        
+                        if next_r == -1: 
+                            break
+                            
+                        if not (0 <= next_r < rows and 0 <= next_c < cols):
+                            break
+                            
+                        # Check if we hit a stream
+                        if streams[next_r, next_c] > 0:
+                            found_connection = True
+                            break
+                            
+                        # Add to potential path
+                        path_r.append(next_r)
+                        path_c.append(next_c)
+                        accum_dist += step_dist
+                        
+                        curr_r, curr_c = next_r, next_c
+                        
+                    if found_connection:
+                        # Fill the gap
+                        for k in range(len(path_r)):
+                            filled_streams[path_r[k], path_c[k]] = 1
+                            
+    return filled_streams
+

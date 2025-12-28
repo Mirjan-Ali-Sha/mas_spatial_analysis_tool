@@ -17,7 +17,8 @@ from qgis.core import (
     QgsFields,
     QgsField,
     QgsWkbTypes,
-    QgsProcessing
+    QgsProcessing,
+    QgsProcessingParameterMapLayer
 )
 from qgis.PyQt.QtCore import QVariant
 from ...core.dem_utils import DEMProcessor
@@ -26,7 +27,8 @@ from ...core.flow_algorithms import FlowRouter
 class SnapPourPointsAlgorithm(QgsProcessingAlgorithm):
     """Unified snap pour points tool."""
     
-    INPUT_POINTS = 'INPUT_POINTS'
+    INPUT_POUR_POINTS = 'INPUT_POUR_POINTS'
+    POUR_POINT_FIELD = 'POUR_POINT_FIELD'
     INPUT_ACC = 'INPUT_ACC'
     SNAP_DIST = 'SNAP_DIST'
     OUTPUT = 'OUTPUT'
@@ -53,15 +55,30 @@ class SnapPourPointsAlgorithm(QgsProcessingAlgorithm):
         return """
         Snap pour points to the cell with highest flow accumulation within a specified distance.
         
-        Useful for ensuring pour points are located on the digital stream network before watershed delineation.
+        Use Case:
+        Corrects manual digitizing errors by moving points to the actual stream channel.
+        Matches ArcGIS behavior by accepting either Raster or Feature pour point data.
         """
     
     def initAlgorithm(self, config=None):
+        # Single input for both Raster and Vector (Points)
         self.addParameter(
-            QgsProcessingParameterFeatureSource(
-                self.INPUT_POINTS,
-                'Input Pour Points',
-                types=[QgsProcessing.TypeVectorPoint]
+            QgsProcessingParameterMapLayer(
+                self.INPUT_POUR_POINTS,
+                'Input raster or feature pour point data',
+                types=[QgsProcessing.TypeVectorPoint, QgsProcessing.TypeRaster]
+            )
+        )
+        
+        # Optional field selection (mostly for vectors)
+        from qgis.core import QgsProcessingParameterField
+        self.addParameter(
+            QgsProcessingParameterField(
+                self.POUR_POINT_FIELD,
+                'Pour point field (optional)',
+                parentLayerParameterName=self.INPUT_POUR_POINTS,
+                type=QgsProcessingParameterField.Any,
+                optional=True
             )
         )
         
@@ -91,79 +108,108 @@ class SnapPourPointsAlgorithm(QgsProcessingAlgorithm):
     
     def processAlgorithm(self, parameters, context, feedback):
         try:
-            points_source = self.parameterAsSource(parameters, self.INPUT_POINTS, context)
+            pour_layer = self.parameterAsLayer(parameters, self.INPUT_POUR_POINTS, context)
             acc_layer = self.parameterAsRasterLayer(parameters, self.INPUT_ACC, context)
             snap_dist = self.parameterAsDouble(parameters, self.SNAP_DIST, context)
+            field_name = self.parameterAsString(parameters, self.POUR_POINT_FIELD, context)
             
-            if points_source is None or acc_layer is None:
-                raise QgsProcessingException('Input Points and Flow Accumulation are required')
+            if pour_layer is None or acc_layer is None:
+                raise QgsProcessingException('Input Pour Points and Flow Accumulation are required')
             
-            feedback.pushInfo('Loading data...')
+            feedback.pushInfo('Loading accumulation data...')
             processor = DEMProcessor(acc_layer.source())
             
-            # Initialize router with acc array as "dem"
-            # We pass geotransform so snap_pour_points can convert coordinates
             router = FlowRouter(
                 processor.array, 
                 processor.cellsize_x,
                 geotransform=processor.geotransform
             )
             
-            # We pass router.dem (which is acc) to snap_pour_points
-            # snap_pour_points expects flow_acc array
-            
-            # Get points
             points = []
-            features = points_source.getFeatures()
-            original_features = [] # Keep to preserve attributes?
+            original_features = [] 
+            source_crs = pour_layer.crs()
+            source_fields = QgsFields()
             
-            for feat in features:
-                geom = feat.geometry()
-                if geom.isMultipart():
-                    pts = geom.asMultiPoint()
+            from qgis.core import QgsMapLayer, QgsVectorLayer, QgsRasterLayer
+            
+            if isinstance(pour_layer, QgsVectorLayer):
+                # Handle Vector Input
+                feedback.pushInfo('Input is Vector Layer.')
+                source_fields = pour_layer.fields()
+                features = pour_layer.getFeatures()
+                
+                for feat in features:
+                    geom = feat.geometry()
+                    pts = []
+                    if geom.isMultipart():
+                        pts = geom.asMultiPoint()
+                    else:
+                        pts = [geom.asPoint()]
+                    
                     for pt in pts:
                         points.append((pt.x(), pt.y()))
-                        original_features.append(feat)
-                else:
-                    pt = geom.asPoint()
-                    points.append((pt.x(), pt.y()))
+                        original_features.append(feat) # Store original features to copy attributes
+                        
+            elif isinstance(pour_layer, QgsRasterLayer):
+                # Handle Raster Input
+                feedback.pushInfo('Input is Raster Layer.')
+                # Create default fields mimicking ArcGIS
+                source_fields.append(QgsField("id", QVariant.Int))
+                source_fields.append(QgsField("value", QVariant.Double))
+                
+                points_processor = DEMProcessor(pour_layer.source())
+                
+                import numpy as np
+                valid_mask = ~np.isnan(points_processor.array)
+                if points_processor.nodata is not None:
+                    valid_mask &= (points_processor.array != points_processor.nodata)
+                valid_mask &= (points_processor.array != 0)
+                
+                y_indices, x_indices = np.where(valid_mask)
+                count = len(y_indices)
+                feedback.pushInfo(f'Found {count} pour point cells.')
+                
+                gt = points_processor.geotransform
+                
+                for i in range(count):
+                    r = y_indices[i]
+                    c = x_indices[i]
+                    val = points_processor.array[r, c]
+                    
+                    # Center of pixel
+                    x = gt[0] + (c + 0.5) * gt[1] + (r + 0.5) * gt[2]
+                    y = gt[3] + (c + 0.5) * gt[4] + (r + 0.5) * gt[5]
+                    
+                    points.append((x, y))
+                    
+                    # Create dictionary-like object or dummy feature to store value
+                    feat = QgsFeature(source_fields)
+                    feat.setAttribute("id", i+1)
+                    feat.setAttribute("value", float(val))
                     original_features.append(feat)
-            
+
+            # Snap
             feedback.pushInfo(f'Snapping {len(points)} points...')
             feedback.setProgress(20)
-            
-            # Snap
-            # We pass router.dem as flow_acc because we loaded acc_layer into it
             snapped_coords = router.snap_pour_points(points, router.dem, snap_dist)
             
+            # Output
             feedback.pushInfo('Creating output...')
-            feedback.setProgress(80)
-            
-            # Create sink
-            fields = points_source.fields()
             (sink, dest_id) = self.parameterAsSink(
-                parameters,
-                self.OUTPUT,
-                context,
-                fields,
-                QgsWkbTypes.Point,
-                points_source.sourceCrs()
+                parameters, self.OUTPUT, context,
+                source_fields, QgsWkbTypes.Point, source_crs
             )
             
             if sink is None:
                 raise QgsProcessingException('Error creating output sink')
             
-            # Add features
             for i, (x, y) in enumerate(snapped_coords):
-                if feedback.isCanceled():
-                    break
-                    
-                feat = QgsFeature(original_features[i])
+                if feedback.isCanceled(): break
+                feat = QgsFeature(original_features[i]) if isinstance(original_features[i], QgsFeature) else original_features[i]
                 feat.setGeometry(QgsGeometry.fromPointXY(QgsPointXY(x, y)))
                 sink.addFeature(feat)
                 
             feedback.setProgress(100)
-            
             return {self.OUTPUT: dest_id}
             
         except Exception as e:
