@@ -36,7 +36,7 @@ repository=https://github.com/Mirjan-Ali-Sha/mas_spatial_analysis_tool
 homepage=https://github.com/Mirjan-Ali-Sha/mas_spatial_analysis_tool/wiki
 
 category=Processing
-icon=icons/mas_icon.svg
+icon=icons/mas_icon.png
 experimental=False
 deprecated=False
 
