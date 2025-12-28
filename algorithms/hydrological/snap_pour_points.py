@@ -57,7 +57,7 @@ class SnapPourPointsAlgorithm(QgsProcessingAlgorithm):
         
         Use Case:
         Corrects manual digitizing errors by moving points to the actual stream channel.
-        Matches ArcGIS behavior by accepting either Raster or Feature pour point data.
+        Accepts either Raster or Feature pour point data as input.
         """
     
     def initAlgorithm(self, config=None):
@@ -153,7 +153,7 @@ class SnapPourPointsAlgorithm(QgsProcessingAlgorithm):
             elif isinstance(pour_layer, QgsRasterLayer):
                 # Handle Raster Input
                 feedback.pushInfo('Input is Raster Layer.')
-                # Create default fields mimicking ArcGIS
+                # Create default fields for output
                 source_fields.append(QgsField("id", QVariant.Int))
                 source_fields.append(QgsField("value", QVariant.Double))
                 

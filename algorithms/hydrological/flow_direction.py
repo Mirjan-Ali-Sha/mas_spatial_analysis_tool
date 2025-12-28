@@ -62,7 +62,7 @@ class FlowDirectionAlgorithm(QgsProcessingAlgorithm):
         
         Options:
         - Force edge cells outward: Ensures all cells at the DEM boundary
-          drain to the edge (similar to ArcGIS behavior).
+          drain to the edge (standard GIS behavior).
         """
     
     def initAlgorithm(self, config=None):

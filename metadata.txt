@@ -16,11 +16,11 @@ about=Professional-grade terrain analysis toolkit for QGIS featuring:
     
     • Stream Network: Stream extraction, Strahler/Shreve ordering, stream links, vectorization, gap joining, valley extraction
     
-    • ArcGIS-Like Workflow: Structured tools mimicking ArcHydro/Spatial Analyst workflow
+    • Structured Workflow: Organized tools following standard hydrology analysis workflow
     
     Key Features:
     - Numba JIT acceleration for 10-100x faster processing
-    - ArcGIS-compatible D8 flow direction encoding
+    - Standard D8 flow direction encoding (industry-compatible)
     - Automatic symbology for flow direction and stream order
     - NoData handling with -9999 standard
     
@@ -40,16 +40,16 @@ icon=icons/mas_icon.png
 experimental=False
 deprecated=False
 
-tags=hydrology,geomorphology,terrain,DEM,watershed,stream,flow,accumulation,direction,slope,aspect,curvature,hillshade,processing,arcgis,archydro,numba
+tags=hydrology,geomorphology,terrain,DEM,watershed,stream,flow,accumulation,direction,slope,aspect,curvature,hillshade,processing,spatial-analysis,numba
 
 changelog=
     1.1.0 (2024-12-28)
     - NEW: Join Stream Links algorithm for gap filling in stream networks
     - NEW: Flow Direction Method selector (D8, Rho8, DINF, MFD)
     - NEW: Comprehensive algorithm documentation (ALGORITHMS.md)
-    - IMPROVED: Extract Streams now shows expression like ArcGIS Raster Calculator
+    - IMPROVED: Extract Streams now shows expression using standard raster algebra syntax
     - IMPROVED: Standardized NoData value to -9999 across all algorithms
-    - IMPROVED: ArcGIS-style symbology for Flow Direction (8-color directional)
+    - IMPROVED: Professional symbology for Flow Direction (8-color directional)
     - IMPROVED: Stream Order symbology with 10-color gradient
     - IMPROVED: Flow Accumulation dynamic symbology based on data range
     - FIXED: Stream extraction now properly outputs 0/1 binary raster
@@ -59,6 +59,6 @@ changelog=
     - Initial release
     - 11 Geomorphometric analysis tools
     - 15 Hydrological analysis tools
-    - 12 Structured hydrology tools (ArcGIS-like workflow)
+    - 12 Structured hydrology tools (standard workflow)
     - 8 Stream network analysis tools
     - Numba-accelerated algorithms

@@ -155,11 +155,55 @@ class SlopeAlgorithm(QgsProcessingAlgorithm):
                 result = processor.calculate_slope(units=units, z_factor=z_factor)
             
             feedback.pushInfo('Saving output...')
-            feedback.setProgress(80)
+            feedback.setProgress(70)
             
             # Save result
             processor.save_raster(output_path, result)
             processor.close()
+            
+            feedback.setProgress(80)
+            
+            # Apply Slope symbology (only for Slope method, not StdDev)
+            if method_idx == 0:
+                feedback.pushInfo('Applying Slope symbology...')
+                try:
+                    from ...core.symbology_utils import apply_slope_symbology
+                    from qgis.core import QgsRasterLayer, QgsProject
+                    
+                    # Check if QGIS will load this layer (user checked "Open output file")
+                    will_load = context.willLoadLayerOnCompletion(output_path)
+                    
+                    if will_load:
+                        feedback.pushInfo('Loading output with symbology...')
+                        
+                        # Create the layer ourselves
+                        import os
+                        layer_name = os.path.splitext(os.path.basename(output_path))[0]
+                        styled_layer = QgsRasterLayer(output_path, layer_name)
+                        
+                        if styled_layer.isValid():
+                            # Apply symbology
+                            apply_slope_symbology(styled_layer)
+                            feedback.pushInfo('Slope symbology applied (green to red gradient)')
+                            
+                            # Add to project
+                            QgsProject.instance().addMapLayer(styled_layer)
+                            feedback.pushInfo('Styled layer added to project')
+                            
+                            # Tell QGIS NOT to load this layer again
+                            context.setLayersToLoadOnCompletion({})
+                        else:
+                            feedback.pushInfo('Warning: Could not load styled layer')
+                    else:
+                        # Just save .qml for future use
+                        temp_layer = QgsRasterLayer(output_path, 'temp_for_style')
+                        if temp_layer.isValid():
+                            apply_slope_symbology(temp_layer)
+                            temp_layer.saveDefaultStyle()
+                            feedback.pushInfo('Slope .qml style file saved')
+                            
+                except Exception as e:
+                    feedback.pushInfo(f'Note: Could not apply symbology: {e}')
             
             feedback.pushInfo('Calculation complete!')
             feedback.setProgress(100)
@@ -287,14 +331,60 @@ class AspectAlgorithm(QgsProcessingAlgorithm):
                 result = processor.calculate_aspect()
             
             feedback.pushInfo('Saving output...')
-            feedback.setProgress(80)
+            feedback.setProgress(70)
             
             processor.save_raster(output_path, result)
             processor.close()
             
+            feedback.setProgress(80)
+            
+            # Apply Aspect symbology (only for Aspect method)
+            if method_idx == 0:
+                feedback.pushInfo('Applying Aspect symbology...')
+                try:
+                    from ...core.symbology_utils import apply_aspect_symbology
+                    from qgis.core import QgsRasterLayer, QgsProject
+                    
+                    # Check if QGIS will load this layer (user checked "Open output file")
+                    will_load = context.willLoadLayerOnCompletion(output_path)
+                    
+                    if will_load:
+                        feedback.pushInfo('Loading output with symbology...')
+                        
+                        # Create the layer ourselves
+                        import os
+                        layer_name = os.path.splitext(os.path.basename(output_path))[0]
+                        styled_layer = QgsRasterLayer(output_path, layer_name)
+                        
+                        if styled_layer.isValid():
+                            # Apply symbology
+                            apply_aspect_symbology(styled_layer)
+                            feedback.pushInfo('Aspect symbology applied (directional colors)')
+                            
+                            # Add to project
+                            QgsProject.instance().addMapLayer(styled_layer)
+                            feedback.pushInfo('Styled layer added to project')
+                            
+                            # Tell QGIS NOT to load this layer again
+                            context.setLayersToLoadOnCompletion({})
+                        else:
+                            feedback.pushInfo('Warning: Could not load styled layer')
+                    else:
+                        # Just save .qml for future use
+                        temp_layer = QgsRasterLayer(output_path, 'temp_for_style')
+                        if temp_layer.isValid():
+                            apply_aspect_symbology(temp_layer)
+                            temp_layer.saveDefaultStyle()
+                            feedback.pushInfo('Aspect .qml style file saved')
+                            
+                except Exception as e:
+                    feedback.pushInfo(f'Note: Could not apply symbology: {e}')
+            
+            feedback.pushInfo('Calculation complete!')
             feedback.setProgress(100)
             
             return {self.OUTPUT: output_path}
             
         except Exception as e:
             raise QgsProcessingException(f'Error processing aspect: {str(e)}')
+

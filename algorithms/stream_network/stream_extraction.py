@@ -84,7 +84,7 @@ class ExtractStreamsAlgorithm(QgsProcessingAlgorithm):
             feedback.pushInfo('Loading Flow Accumulation raster...')
             processor = DEMProcessor(input_layer.source())
             
-            # Show the expression being used (like ArcGIS Raster Calculator)
+            # Show the expression being used (standard raster algebra syntax)
             feedback.pushInfo(f'Extracting streams using expression: "flow_acc" >= {threshold}')
             feedback.setProgress(30)
             

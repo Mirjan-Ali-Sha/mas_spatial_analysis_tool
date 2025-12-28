@@ -41,8 +41,8 @@ class StructBasinAlgorithm(BasinAnalysisAlgorithm):
     
     def name(self): return 'struct_basin'
     def displayName(self): return 'Basin'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructBasinAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -70,8 +70,8 @@ class StructBasinAlgorithm(BasinAnalysisAlgorithm):
 class StructFillAlgorithm(DepressionHandlingAlgorithm):
     def name(self): return 'struct_fill'
     def displayName(self): return 'Fill'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructFillAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -98,8 +98,8 @@ class StructFlowAccumulationAlgorithm(FlowAccumulationAlgorithm):
     
     def name(self): return 'struct_flow_accumulation'
     def displayName(self): return 'Flow Accumulation'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructFlowAccumulationAlgorithm()
     
     def shortHelpString(self):
@@ -275,12 +275,12 @@ class StructFlowAccumulationAlgorithm(FlowAccumulationAlgorithm):
         return {self.OUTPUT_FLOW_ACC: output_path}
 
 class StructFlowDirectionAlgorithm(FlowDirectionAlgorithm):
-    """Flow Direction with automatic ArcGIS-style symbology."""
+    """Flow Direction with automatic standard symbology."""
     
     def name(self): return 'struct_flow_direction'
     def displayName(self): return 'Flow Direction'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructFlowDirectionAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -302,8 +302,8 @@ class StructFlowDistanceAlgorithm(FlowDistanceAlgorithm):
     
     def name(self): return 'struct_flow_distance'
     def displayName(self): return 'Flow Distance'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructFlowDistanceAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -337,8 +337,8 @@ class StructFlowDistanceAlgorithm(FlowDistanceAlgorithm):
 class StructFlowLengthAlgorithm(FlowLengthAlgorithm):
     def name(self): return 'struct_flow_length'
     def displayName(self): return 'Flow Length'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructFlowLengthAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -349,8 +349,8 @@ class StructFlowLengthAlgorithm(FlowLengthAlgorithm):
 class StructSinkAlgorithm(SinkAnalysisAlgorithm):
     def name(self): return 'struct_sink'
     def displayName(self): return 'Sink'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructSinkAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -371,8 +371,8 @@ class StructSnapPourPointAlgorithm(SnapPourPointsAlgorithm):
 
     def name(self): return 'struct_snap_pour_point'
     def displayName(self): return 'Snap Pour Point'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructSnapPourPointAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -460,8 +460,8 @@ class StructSnapPourPointAlgorithm(SnapPourPointsAlgorithm):
 class StructStreamLinkAlgorithm(StreamLinkAlgorithm):
     def name(self): return 'struct_stream_link'
     def displayName(self): return 'Stream Link'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructStreamLinkAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -474,8 +474,8 @@ class StructStreamLinkAlgorithm(StreamLinkAlgorithm):
 class StructStreamOrderAlgorithm(StreamOrderingAlgorithm):
     def name(self): return 'struct_stream_order'
     def displayName(self): return 'Stream Order'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructStreamOrderAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -488,8 +488,8 @@ class StructStreamOrderAlgorithm(StreamOrderingAlgorithm):
 class StructStreamToFeatureAlgorithm(VectorStreamNetworkAlgorithm):
     def name(self): return 'struct_stream_to_feature'
     def displayName(self): return 'Stream to Feature'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructStreamToFeatureAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -506,8 +506,8 @@ class StructWatershedAlgorithm(WatershedDelineationAlgorithm):
     
     def name(self): return 'struct_watershed'
     def displayName(self): return 'Watershed'
-    def group(self): return 'Hydrology Analysis - ArcGIS Like'
-    def groupId(self): return 'hydrology_arcgis_like'
+    def group(self): return 'Hydrology Analysis - Structured Workflow'
+    def groupId(self): return 'hydrology_structured'
     def createInstance(self): return StructWatershedAlgorithm()
     
     def initAlgorithm(self, config=None):
@@ -535,10 +535,10 @@ class StructWatershedAlgorithm(WatershedDelineationAlgorithm):
         coords = []
         ids = []
         
-        # Check if pour_points_source is valid (it might be None if user provided Raster but we defined it as FeatureSource... wait)
+        # Check if pour_points_source is valid (it might be None if user provided Raster but we defined it as FeatureSource)
         # QgsProcessingParameterFeatureSource only accepts Vector.
         # To accept Raster OR Vector, we usually need two parameters or a more complex setup.
-        # ArcGIS has "Input raster or feature pour point data".
+        # Standard GIS tools often support "Input raster or feature pour point data".
         # In QGIS, we can't easily make a single parameter accept both types in the UI nicely without custom widget.
         # But we can try to handle it if we use QgsProcessingParameterMapLayer? No, that's too generic.
         # Let's stick to FeatureSource for now as defined in previous step, but user asked for "Input Raster or Feature".
@@ -549,7 +549,7 @@ class StructWatershedAlgorithm(WatershedDelineationAlgorithm):
         # BUT I realized I made a mistake in initAlgorithm above: I only added FeatureSource.
         # I should add a Raster parameter too?
         # Or just stick to Vector for now as implementing Raster pour point extraction is complex (need to align grids).
-        # Let's stick to Vector for now but ensure the name matches ArcGIS.
+        # Let's stick to Vector for now with standard parameter naming.
         
         if pour_points_source:
              features = pour_points_source.getFeatures()

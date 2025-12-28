@@ -24,6 +24,10 @@ class DependencyInstaller:
     
     PLUGIN_NAME = "MAS Spatial Analysis Tool"
     
+    # Minimum Numba version for Python 3.9+ compatibility
+    # Numba 0.50 doesn't support LIST_EXTEND opcode, need >= 0.53.0
+    MIN_NUMBA_VERSION = "0.53.0"
+    
     def __init__(self, iface, required_packages: dict):
         """
         Initialize the installer.
@@ -31,7 +35,7 @@ class DependencyInstaller:
         Args:
             iface: QGIS interface
             required_packages: Dict of {pip_package_name: import_module_name}
-                e.g., {'numba': 'numba'}
+                e.g., {'numba': 'numba'} or {'numba>=0.53.0': 'numba'}
         """
         self.iface = iface
         self.required_packages = required_packages
@@ -125,22 +129,54 @@ class DependencyInstaller:
     
     def check_dependencies(self) -> list:
         """
-        Check which required packages are missing.
+        Check which required packages are missing or need upgrade.
         
         Returns:
-            List of missing package names (pip names)
+            List of missing/outdated package names (pip names with version spec)
         """
         missing = []
         
         for package_name, import_name in self.required_packages.items():
             try:
-                __import__(import_name)
+                module = __import__(import_name)
+                
+                # Special check for numba version
+                if import_name == 'numba':
+                    if hasattr(module, '__version__'):
+                        installed_version = module.__version__
+                        if self._version_lt(installed_version, self.MIN_NUMBA_VERSION):
+                            # Numba is installed but too old
+                            missing.append(f'numba>={self.MIN_NUMBA_VERSION}')
+                            self._log(
+                                f"⚠ numba {installed_version} is outdated, need >= {self.MIN_NUMBA_VERSION}",
+                                Qgis.Warning
+                            )
+                            continue
+                
                 self._log(f"✓ {package_name} is installed")
             except ImportError:
-                missing.append(package_name)
+                # For numba, always add version requirement
+                if import_name == 'numba':
+                    missing.append(f'numba>={self.MIN_NUMBA_VERSION}')
+                else:
+                    missing.append(package_name)
                 self._log(f"✗ {package_name} is missing (optional)", Qgis.Info)
         
         return missing
+    
+    def _version_lt(self, version1: str, version2: str) -> bool:
+        """Check if version1 < version2 (simple version comparison)"""
+        try:
+            from packaging import version as pkg_version
+            return pkg_version.parse(version1) < pkg_version.parse(version2)
+        except ImportError:
+            # Fallback: simple tuple comparison
+            def parse_version(v):
+                return tuple(int(x) for x in v.split('.')[:3] if x.isdigit())
+            try:
+                return parse_version(version1) < parse_version(version2)
+            except:
+                return False  # Can't compare, assume OK
     
     def check_and_install(self, silent_if_ok: bool = True) -> bool:
         """
@@ -339,21 +375,37 @@ class DependencyInstaller:
 
 
 class DependencyInstallDialog(QDialog):
-    """Dialog to confirm dependency installation"""
+    """Dialog to confirm dependency installation or upgrade"""
     
     def __init__(self, parent, packages: list, plugin_name: str):
         super().__init__(parent)
-        self.setWindowTitle(f"{plugin_name} - Optional Dependencies")
+        
+        # Check if this is an upgrade scenario
+        is_upgrade = any('>=' in pkg for pkg in packages)
+        
+        if is_upgrade:
+            self.setWindowTitle(f"{plugin_name} - Upgrade Required")
+        else:
+            self.setWindowTitle(f"{plugin_name} - Optional Dependencies")
         self.setMinimumWidth(480)
         
         layout = QVBoxLayout(self)
         
         # Info icon and message
-        header = QLabel(
-            f"<h3>⚡ Optional Performance Boost Available</h3>"
-            f"<p>The <b>{plugin_name}</b> plugin can use <b>Numba</b> for "
-            f"significantly faster hydrological processing (10-100x speedup).</p>"
-        )
+        if is_upgrade:
+            header = QLabel(
+                f"<h3>⚠️ Numba Upgrade Required</h3>"
+                f"<p>Your installed <b>Numba</b> version is too old and doesn't support "
+                f"Python 3.9+ properly.</p>"
+                f"<p>This causes the <b>LIST_EXTEND opcode</b> error when running "
+                f"flow algorithms.</p>"
+            )
+        else:
+            header = QLabel(
+                f"<h3>⚡ Optional Performance Boost Available</h3>"
+                f"<p>The <b>{plugin_name}</b> plugin can use <b>Numba</b> for "
+                f"significantly faster hydrological processing (10-100x speedup).</p>"
+            )
         layout.addWidget(header)
         
         # Package list
@@ -374,11 +426,18 @@ class DependencyInstallDialog(QDialog):
         layout.addWidget(benefits)
         
         # Note
-        note = QLabel(
-            "<p><small>This will install packages to your user directory using pip.<br>"
-            "The plugin will continue to work without Numba but will be slower.<br>"
-            "Installation may take a few minutes.</small></p>"
-        )
+        if is_upgrade:
+            note = QLabel(
+                "<p><small>This will upgrade Numba to a compatible version using pip.<br>"
+                "A QGIS restart may be required after the upgrade.<br>"
+                "Installation may take a few minutes.</small></p>"
+            )
+        else:
+            note = QLabel(
+                "<p><small>This will install packages to your user directory using pip.<br>"
+                "The plugin will continue to work without Numba but will be slower.<br>"
+                "Installation may take a few minutes.</small></p>"
+            )
         note.setStyleSheet("color: #666;")
         layout.addWidget(note)
         
@@ -390,7 +449,10 @@ class DependencyInstallDialog(QDialog):
         skip_btn.clicked.connect(self.reject)
         btn_layout.addWidget(skip_btn)
         
-        install_btn = QPushButton("Install Numba (Recommended)")
+        if is_upgrade:
+            install_btn = QPushButton("Upgrade Numba (Recommended)")
+        else:
+            install_btn = QPushButton("Install Numba (Recommended)")
         install_btn.setDefault(True)
         install_btn.setStyleSheet(
             "QPushButton { background-color: #27ae60; color: white; padding: 8px 16px; }"
@@ -403,9 +465,21 @@ class DependencyInstallDialog(QDialog):
 
 
 def check_numba_available() -> bool:
-    """Check if Numba is available without prompting."""
+    """Check if Numba is available and meets minimum version requirements."""
     try:
         import numba
+        # Check minimum version for Python 3.9+ compatibility
+        min_version = "0.53.0"
+        if hasattr(numba, '__version__'):
+            installed = numba.__version__
+            # Simple version comparison
+            def parse_version(v):
+                return tuple(int(x) for x in v.split('.')[:3] if x.isdigit())
+            try:
+                if parse_version(installed) < parse_version(min_version):
+                    return False  # Numba too old
+            except:
+                pass  # Can't parse, assume OK
         return True
     except ImportError:
         return False
@@ -413,15 +487,16 @@ def check_numba_available() -> bool:
 
 def check_and_install_numba(iface) -> bool:
     """
-    Convenience function to check and offer Numba installation.
+    Convenience function to check and offer Numba installation/upgrade.
     
     Args:
         iface: QGIS interface
         
     Returns:
-        True if Numba is available (or installed), False if skipped
+        True if Numba is available (or installed/upgraded), False if skipped
     """
     required_packages = {'numba': 'numba'}
     
     installer = DependencyInstaller(iface, required_packages)
     return installer.check_and_install(silent_if_ok=True)
+

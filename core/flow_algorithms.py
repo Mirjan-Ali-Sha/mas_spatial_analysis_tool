@@ -21,6 +21,13 @@ except ImportError:
     
     prange = range
 
+# Module-level constants for Numba 0.50 compatibility
+# Older Numba versions (e.g., 0.50) don't support LIST_EXTEND opcode when creating
+# np.array([...]) inside nopython JIT functions with Python 3.9+, so define here
+_DRS = np.array([0, 1, 1, 1, 0, -1, -1, -1], dtype=np.int32)
+_DCS = np.array([1, 1, 0, -1, -1, -1, 0, 1], dtype=np.int32)
+_CODES = np.array([1, 2, 4, 8, 16, 32, 64, 128], dtype=np.int32)
+
 # Numba-optimized static functions
 # Note: Fill depressions uses sorted-cell approach for maximum performance
 
@@ -30,8 +37,9 @@ def _fill_depressions_core(filled, order, rows, cols, epsilon):
     
     This is O(N) after the sort is done externally.
     """
-    drs = np.array([0, 1, 1, 1, 0, -1, -1, -1], dtype=np.int32)
-    dcs = np.array([1, 1, 0, -1, -1, -1, 0, 1], dtype=np.int32)
+    # Use module-level constants for Numba 0.50 compatibility
+    drs = _DRS
+    dcs = _DCS
     
     n = len(order)
     for idx in range(n):
@@ -243,7 +251,7 @@ def _fill_depressions_numba(dem, epsilon=0.001):
 def _d8_flow_direction_numba(dem, nodata_val, cellsize_x, cellsize_y):
     """Calculate D8 flow direction (Numba optimized).
     
-    Returns flow direction using ArcGIS D8 encoding:
+    Returns flow direction using standard D8 encoding:
     - 1=E, 2=SE, 4=S, 8=SW, 16=W, 32=NW, 64=N, 128=NE
     
     Uses steepest descent among valid neighbors.
@@ -252,15 +260,23 @@ def _d8_flow_direction_numba(dem, nodata_val, cellsize_x, cellsize_y):
     rows, cols = dem.shape
     flow_dir = np.zeros((rows, cols), dtype=np.int32)
     
-    # Standard Directions: E, SE, S, SW, W, NW, N, NE (Ascending Codes 1..128)
-    drs = np.array([0, 1, 1, 1, 0, -1, -1, -1])
-    dcs = np.array([1, 1, 0, -1, -1, -1, 0, 1])
-    codes = np.array([1, 2, 4, 8, 16, 32, 64, 128])
+    # Use module-level constants for Numba 0.50 compatibility
+    # (avoids unsupported LIST_EXTEND opcode in older Numba with Python 3.9+)
+    drs = _DRS
+    dcs = _DCS
+    codes = _CODES
     
-    # Distances for slope calculation
+    # Distances for slope calculation - build manually to avoid LIST_EXTEND
     diag_dist = np.sqrt(cellsize_x**2 + cellsize_y**2)
-    dists = np.array([cellsize_x, diag_dist, cellsize_y, diag_dist, 
-                      cellsize_x, diag_dist, cellsize_y, diag_dist])
+    dists = np.empty(8, dtype=np.float64)
+    dists[0] = cellsize_x    # E
+    dists[1] = diag_dist     # SE
+    dists[2] = cellsize_y    # S
+    dists[3] = diag_dist     # SW
+    dists[4] = cellsize_x    # W
+    dists[5] = diag_dist     # NW
+    dists[6] = cellsize_y    # N
+    dists[7] = diag_dist     # NE
     
     for r in prange(rows):
         for c in range(cols):
@@ -641,7 +657,7 @@ class FlowRouter:
         """Fill depressions using priority-flood algorithm (Wang & Liu 2006).
         
         This is the standard hydrological depression filling algorithm.
-        Processes from boundary inward, ensuring correct results matching ArcGIS.
+        Processes from boundary inward, ensuring correct results matching industry standards.
         
         Args:
             epsilon: Small elevation increment to ensure drainage
@@ -650,27 +666,69 @@ class FlowRouter:
         
         Uses Python heapq which is a C-based heap implementation.
         """
+        NODATA = -9999.0
+        
         filled = _fill_depressions_heapq(self.dem, epsilon)
         
         if resolve_flats:
             # Apply flat area resolution to create proper flow paths
             filled = _resolve_flats_toward_outlets(filled, epsilon=epsilon/1000)
         
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        filled[nodata_mask] = NODATA
+        
         return filled
 
     def fill_single_cell_pits(self):
-        """Fill single-cell pits (raise pit to lowest neighbor)."""
-        return _fill_single_cell_pits_numba(self.dem)
+        """Fill single-cell pits (raise pit to lowest neighbor).
+        
+        Returns:
+            np.ndarray: Filled DEM (nodata = -9999.0)
+        """
+        NODATA = -9999.0
+        
+        filled = _fill_single_cell_pits_numba(self.dem)
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        filled[nodata_mask] = NODATA
+        
+        return filled
         
     def breach_single_cell_pits(self):
-        """Breach single-cell pits (lower lowest neighbor to pit level)."""
-        return _breach_single_cell_pits_numba(self.dem)
+        """Breach single-cell pits (lower lowest neighbor to pit level).
+        
+        Returns:
+            np.ndarray: Breached DEM (nodata = -9999.0)
+        """
+        NODATA = -9999.0
+        
+        breached = _breach_single_cell_pits_numba(self.dem)
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        breached[nodata_mask] = NODATA
+        
+        return breached
     
     def d8_flow_direction(self):
-        """Calculate D8 flow direction."""
-        return _d8_flow_direction_numba(
+        """Calculate D8 flow direction.
+        
+        Returns:
+            np.ndarray: Flow direction (nodata = -9999)
+        """
+        NODATA = -9999
+        
+        flow_dir = _d8_flow_direction_numba(
             self.dem, self.nodata, self.cellsize_x, self.cellsize_y
         )
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        flow_dir[nodata_mask] = NODATA
+        
+        return flow_dir
     
     def extract_streams(self, flow_acc, threshold):
         """Extract streams from flow accumulation raster.
@@ -678,7 +736,7 @@ class FlowRouter:
         Creates a binary stream raster using the expression:
         flow_acc >= threshold
         
-        This is equivalent to ArcGIS Raster Calculator:
+        This is equivalent to standard raster algebra:
         "flow_acc" >= threshold
         
         Args:
@@ -698,10 +756,22 @@ class FlowRouter:
         return streams
     
     def dinf_flow_direction(self):
-        """Calculate D-Infinity flow direction (angle)."""
-        return _dinf_flow_direction_numba(
+        """Calculate D-Infinity flow direction (angle).
+        
+        Returns:
+            np.ndarray: Flow direction in radians (nodata = -9999.0)
+        """
+        NODATA = -9999.0
+        
+        flow_dir = _dinf_flow_direction_numba(
             self.dem, self.nodata, self.cellsize_x, self.cellsize_y
         )
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        flow_dir[nodata_mask] = NODATA
+        
+        return flow_dir
 
     def fd8_flow_accumulation(self, weights=None):
         """Calculate FD8 flow accumulation."""
@@ -714,38 +784,86 @@ class FlowRouter:
 
 
     def rho8_flow_direction(self):
-        """Calculate Rho8 flow direction (stochastic)."""
-        return _rho8_flow_direction_numba(
+        """Calculate Rho8 flow direction (stochastic).
+        
+        Returns:
+            np.ndarray: Flow direction (nodata = -9999)
+        """
+        NODATA = -9999
+        
+        flow_dir = _rho8_flow_direction_numba(
             self.dem, self.nodata, self.cellsize_x, self.cellsize_y
         )
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        flow_dir[nodata_mask] = NODATA
+        
+        return flow_dir
     def d8_flow_accumulation(self, flow_dir, weights=None):
-        """Calculate D8 flow accumulation."""
+        """Calculate D8 flow accumulation.
+        
+        Returns:
+            np.ndarray: Flow accumulation (nodata = -9999.0)
+        """
+        NODATA = -9999.0
+        
         if weights is None:
             weights = np.ones_like(self.dem)
             
-        return _d8_flow_accumulation_numba(
+        flow_acc = _d8_flow_accumulation_numba(
             flow_dir.astype(np.int32), 
             weights, 
             self.codes, 
             self.drs, 
             self.dcs
         )
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        flow_acc[nodata_mask] = NODATA
+        
+        return flow_acc
 
     def dinf_flow_accumulation(self, flow_dir, weights=None):
-        """Calculate D-Infinity flow accumulation."""
+        """Calculate D-Infinity flow accumulation.
+        
+        Returns:
+            np.ndarray: Flow accumulation (nodata = -9999.0)
+        """
+        NODATA = -9999.0
+        
         if weights is None:
             weights = np.ones_like(self.dem)
-        return _dinf_flow_accumulation_numba(
+        flow_acc = _dinf_flow_accumulation_numba(
             self.dem, flow_dir, weights, self.cellsize_x
         )
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        flow_acc[nodata_mask] = NODATA
+        
+        return flow_acc
 
     def fd8_flow_accumulation(self, weights=None):
-        """Calculate FD8 flow accumulation."""
+        """Calculate FD8 flow accumulation.
+        
+        Returns:
+            np.ndarray: Flow accumulation (nodata = -9999.0)
+        """
+        NODATA = -9999.0
+        
         if weights is None:
             weights = np.ones_like(self.dem)
-        return _fd8_flow_accumulation_numba(
+        flow_acc = _fd8_flow_accumulation_numba(
             self.dem, weights, self.cellsize_x
         )
+        
+        # Mark nodata cells from input DEM
+        nodata_mask = np.isnan(self.dem)
+        flow_acc[nodata_mask] = NODATA
+        
+        return flow_acc
     
     def extract_streams(self, flow_acc, threshold):
         """Extract streams based on flow accumulation threshold."""

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 core/symbology_utils.py
-ArcGIS-style symbology utilities for hydrology output layers
+Professional-style symbology utilities for hydrology output layers
 """
 
 from qgis.core import (
@@ -18,7 +18,7 @@ from qgis.PyQt.QtGui import QColor
 
 def apply_flow_direction_symbology(layer: QgsRasterLayer):
     """
-    Apply ArcGIS-like flow direction symbology.
+    Apply professional flow direction symbology.
     Uses categorical colors for 8 D8 direction codes.
     
     D8 codes: E=1, SE=2, S=4, SW=8, W=16, NW=32, N=64, NE=128
@@ -28,7 +28,7 @@ def apply_flow_direction_symbology(layer: QgsRasterLayer):
     
     from qgis.core import QgsPalettedRasterRenderer
     
-    # D8 direction color scheme (ArcGIS-style) - using QgsPalettedRasterRenderer.Class
+    # D8 direction color scheme (professional-style) - using QgsPalettedRasterRenderer.Class
     classes = [
         QgsPalettedRasterRenderer.Class(1, QColor(255, 0, 0), 'E'),        # East - Red
         QgsPalettedRasterRenderer.Class(2, QColor(255, 127, 0), 'SE'),     # Southeast - Orange
@@ -53,14 +53,14 @@ def apply_flow_direction_symbology(layer: QgsRasterLayer):
 
 def apply_flow_accumulation_symbology(layer: QgsRasterLayer, log_scale: bool = True):
     """
-    Apply ArcGIS-like flow accumulation symbology.
+    Apply professional flow accumulation symbology.
     
     Uses 2 discrete classes for stream extraction visualization:
     - Class 1: Non-stream cells (light/white)
     - Class 2: Stream cells (dark blue)
     
     Breaking point is calculated as 0.044% of max value
-    (same ratio as 1500/3394716 in ArcGIS reference data).
+    (based on standard stream extraction ratios).
     """
     if not layer or not layer.isValid():
         return False
@@ -72,7 +72,7 @@ def apply_flow_accumulation_symbology(layer: QgsRasterLayer, log_scale: bool = T
     actual_max = stats.maximumValue
     
     # Calculate dynamic breaking point
-    # Based on ArcGIS ratio: 1500 / 3394716 ≈ 0.000442 (0.044%)
+    # Based on standard stream extraction ratio: 1500 / 3394716 ≈ 0.000442 (0.044%)
     break_ratio = 1500.0 / 3394716.0
     break_point = actual_max * break_ratio
     
@@ -178,7 +178,7 @@ def apply_stream_order_symbology(layer: QgsRasterLayer):
 
 def apply_watershed_symbology(layer: QgsRasterLayer):
     """
-    Apply ArcGIS-like watershed/basin symbology.
+    Apply professional watershed/basin symbology.
     Uses random categorical colors for unique basin IDs.
     """
     if not layer or not layer.isValid():
@@ -223,7 +223,7 @@ def apply_watershed_symbology(layer: QgsRasterLayer):
 
 def apply_stream_symbology(layer: QgsRasterLayer):
     """
-    Apply ArcGIS-like stream symbology.
+    Apply professional stream symbology.
     Blue for stream cells, transparent for non-stream.
     """
     if not layer or not layer.isValid():
@@ -281,3 +281,121 @@ def apply_dem_symbology(layer: QgsRasterLayer):
     layer.triggerRepaint()
     
     return True
+
+
+def apply_slope_symbology(layer: QgsRasterLayer):
+    """
+    Apply professional slope symbology.
+    
+    Uses classified color ramp from green (flat) to red (steep):
+    - Green: 0-5° (flat/gentle)
+    - Yellow-Green: 5-15° (moderate)
+    - Yellow: 15-25° (moderately steep)
+    - Orange: 25-35° (steep)
+    - Red: 35-45° (very steep)
+    - Dark Red: 45°+ (extremely steep)
+    """
+    if not layer or not layer.isValid():
+        return False
+    
+    # Get statistics from actual data
+    provider = layer.dataProvider()
+    stats = provider.bandStatistics(1, QgsRasterBandStats.All)
+    actual_min = max(0, stats.minimumValue)  # Slope can't be negative
+    actual_max = stats.maximumValue
+    
+    # Create shader with classified colors
+    shader = QgsRasterShader()
+    color_ramp_shader = QgsColorRampShader()
+    color_ramp_shader.setColorRampType(QgsColorRampShader.Interpolated)
+    
+    # Professional slope classification (9 classes)
+    # Using equal intervals based on the actual data range
+    range_val = actual_max - actual_min
+    num_classes = 9
+    
+    # Color scheme: dark green -> light green -> yellow -> orange -> red -> brown
+    colors = [
+        QColor(38, 115, 0),      # Dark green
+        QColor(56, 168, 0),      # Green
+        QColor(121, 192, 0),     # Yellow-green
+        QColor(210, 225, 0),     # Yellow
+        QColor(255, 255, 0),     # Bright yellow
+        QColor(255, 191, 0),     # Orange-yellow
+        QColor(255, 127, 0),     # Orange
+        QColor(230, 76, 0),      # Red-orange
+        QColor(168, 56, 0),      # Brown-red
+    ]
+    
+    items = []
+    for i in range(num_classes):
+        val = actual_min + (range_val * (i + 1) / num_classes)
+        prev_val = actual_min + (range_val * i / num_classes) if i > 0 else actual_min
+        label = f'{prev_val:.2f} - {val:.2f}'
+        items.append(QgsColorRampShader.ColorRampItem(val, colors[i], label))
+    
+    color_ramp_shader.setColorRampItemList(items)
+    shader.setRasterShaderFunction(color_ramp_shader)
+    
+    renderer = QgsSingleBandPseudoColorRenderer(layer.dataProvider(), 1, shader)
+    renderer.setClassificationMin(actual_min)
+    renderer.setClassificationMax(actual_max)
+    
+    layer.setRenderer(renderer)
+    layer.emitStyleChanged()
+    layer.triggerRepaint()
+    
+    return True
+
+
+def apply_aspect_symbology(layer: QgsRasterLayer):
+    """
+    Apply professional aspect symbology.
+    
+    Uses categorical colors for 8 cardinal/intercardinal directions:
+    - Flat (-1): Gray
+    - North (0-22.5, 337.5-360): Red
+    - Northeast (22.5-67.5): Orange
+    - East (67.5-112.5): Yellow
+    - Southeast (112.5-157.5): Green
+    - South (157.5-202.5): Cyan
+    - Southwest (202.5-247.5): Blue
+    - West (247.5-292.5): Purple
+    - Northwest (292.5-337.5): Magenta
+    """
+    if not layer or not layer.isValid():
+        return False
+    
+    # Create shader with discrete classification
+    shader = QgsRasterShader()
+    color_ramp_shader = QgsColorRampShader()
+    color_ramp_shader.setColorRampType(QgsColorRampShader.Discrete)
+    
+    # Professional aspect color scheme
+    # Each item defines the upper bound of the category
+    items = [
+        QgsColorRampShader.ColorRampItem(-0.5, QColor(178, 178, 178), 'Flat (-1)'),
+        QgsColorRampShader.ColorRampItem(22.5, QColor(255, 0, 0), 'North (0-22.5)'),
+        QgsColorRampShader.ColorRampItem(67.5, QColor(255, 170, 0), 'Northeast (22.5-67.5)'),
+        QgsColorRampShader.ColorRampItem(112.5, QColor(255, 255, 0), 'East (67.5-112.5)'),
+        QgsColorRampShader.ColorRampItem(157.5, QColor(85, 255, 0), 'Southeast (112.5-157.5)'),
+        QgsColorRampShader.ColorRampItem(202.5, QColor(0, 255, 255), 'South (157.5-202.5)'),
+        QgsColorRampShader.ColorRampItem(247.5, QColor(0, 85, 255), 'Southwest (202.5-247.5)'),
+        QgsColorRampShader.ColorRampItem(292.5, QColor(170, 0, 255), 'West (247.5-292.5)'),
+        QgsColorRampShader.ColorRampItem(337.5, QColor(255, 0, 255), 'Northwest (292.5-337.5)'),
+        QgsColorRampShader.ColorRampItem(360, QColor(255, 0, 0), 'North (337.5-360)'),
+    ]
+    
+    color_ramp_shader.setColorRampItemList(items)
+    shader.setRasterShaderFunction(color_ramp_shader)
+    
+    renderer = QgsSingleBandPseudoColorRenderer(layer.dataProvider(), 1, shader)
+    renderer.setClassificationMin(-1)
+    renderer.setClassificationMax(360)
+    
+    layer.setRenderer(renderer)
+    layer.emitStyleChanged()
+    layer.triggerRepaint()
+    
+    return True
+

@@ -52,7 +52,7 @@ class DEMProcessor:
                 nodata_mask = np.isclose(self.array, self.nodata, rtol=1e-5, atol=1e-8, equal_nan=True)
                 self.array[nodata_mask] = np.nan
             
-            # Also handle very large negative values (ArcGIS NoData = -3.4e+38)
+            # Also handle very large negative values (common NoData = -3.4e+38)
             self.array[self.array < -1e30] = np.nan
                 
         except Exception as e:
@@ -64,17 +64,22 @@ class DEMProcessor:
         Args:
             output_path (str): Output file path
             data (np.ndarray): Data array to save
-            dtype: GDAL data type (default: source dtype or Float32)
-            nodata: NoData value (default: source nodata or -9999)
+            dtype: GDAL data type (default: Float32 for most outputs)
+            nodata: NoData value (default: -9999.0)
         """
         try:
-            # Determine dtype and nodata
-            save_dtype = dtype if dtype is not None else (self.source_dtype if hasattr(self, 'source_dtype') else gdal.GDT_Float32)
-            save_nodata = nodata if nodata is not None else (self.nodata if self.nodata is not None else -9999)
+            # Default to Float32 for derived products (slope, etc.)
+            save_dtype = dtype if dtype is not None else gdal.GDT_Float32
+            save_nodata = nodata if nodata is not None else -9999.0
+            
+            # Create a copy and handle nodata values
+            data_copy = data.copy().astype(np.float32)
             
             # Replace NaN with nodata value
-            data_copy = data.copy()
             data_copy[np.isnan(data)] = save_nodata
+            
+            # Also ensure -9999.0 values are preserved (in case input already uses this)
+            # This handles cases where algorithms return -9999.0 directly
             
             # Create output dataset
             driver = gdal.GetDriverByName('GTiff')
@@ -95,10 +100,10 @@ class DEMProcessor:
             # Write data
             out_band = out_dataset.GetRasterBand(1)
             out_band.WriteArray(data_copy)
-            out_band.SetNoDataValue(save_nodata)
+            out_band.SetNoDataValue(float(save_nodata))
             out_band.FlushCache()
             
-            # Calculate statistics
+            # Calculate statistics (excludes nodata)
             out_band.ComputeStatistics(False)
             
             # Close dataset

@@ -22,34 +22,42 @@ class MorphometryProcessor(DEMProcessor):
     """Extended DEM processor for morphometric analysis."""
     
     def calculate_slope(self, units='degrees', z_factor=1.0):
-        """Calculate slope using Horn's method (same as GDAL).
+        """Calculate slope using Horn's method (same as GDAL/standard GIS).
         
         Args:
             units (str): 'degrees' or 'percent'
             z_factor (float): Vertical exaggeration factor
             
         Returns:
-            np.ndarray: Slope array
+            np.ndarray: Slope array (nodata = -9999.0)
         """
+        # Use concrete nodata value for reliable GDAL compatibility
+        NODATA = -9999.0
+        
         # Apply z_factor
         dem = self.array * z_factor
         
+        # Mask input nodata (replace with 0 temporarily for convolution)
+        input_nodata_mask = np.isnan(dem)
+        dem_filled = np.where(input_nodata_mask, 0, dem)
+        
         # Calculate gradients using Sobel operators (Horn's method)
-        # 3x3 kernel for x direction
+        # This matches standard GIS slope calculation (GDAL, GRASS, etc.)
+        # 3x3 kernel for x direction: (c + 2f + i) - (a + 2d + g) / (8*cellsize)
         kernel_x = np.array([[-1, 0, 1],
                              [-2, 0, 2],
                              [-1, 0, 1]]) / (8.0 * self.cellsize_x)
         
-        # 3x3 kernel for y direction
+        # 3x3 kernel for y direction: (g + 2h + i) - (a + 2b + c) / (8*cellsize)
         kernel_y = np.array([[-1, -2, -1],
                              [0, 0, 0],
                              [1, 2, 1]]) / (8.0 * self.cellsize_y)
         
-        # Calculate gradients
-        dzdx = ndimage.convolve(dem, kernel_x, mode='nearest')
-        dzdy = ndimage.convolve(dem, kernel_y, mode='nearest')
+        # Calculate gradients using nearest mode for boundary handling
+        dzdx = ndimage.convolve(dem_filled, kernel_x, mode='nearest')
+        dzdy = ndimage.convolve(dem_filled, kernel_y, mode='nearest')
         
-        # Calculate slope
+        # Calculate slope: arctan(sqrt(dzdx^2 + dzdy^2))
         slope_rad = np.arctan(np.sqrt(dzdx**2 + dzdy**2))
         
         if units == 'degrees':
@@ -59,8 +67,15 @@ class MorphometryProcessor(DEMProcessor):
         else:
             slope = slope_rad  # radians
         
-        # Mask nodata
-        slope[np.isnan(self.array)] = np.nan
+        # Apply nodata mask from input
+        slope[input_nodata_mask] = NODATA
+        
+        # Set edge pixels to NoData (matching standard GIS behavior)
+        # Standard implementations require valid neighbors; edge pixels don't have all 8 neighbors
+        slope[0, :] = NODATA   # Top edge
+        slope[-1, :] = NODATA  # Bottom edge
+        slope[:, 0] = NODATA   # Left edge
+        slope[:, -1] = NODATA  # Right edge
         
         return slope
     

@@ -12,7 +12,7 @@
 
 - **45+ Analysis Algorithms** across 4 categories
 - **Numba JIT Acceleration** - 10-100x faster processing
-- **ArcGIS-Compatible** - D8 flow direction encoding (1,2,4,8,16,32,64,128)
+- **Industry-Standard** - D8 flow direction encoding (1,2,4,8,16,32,64,128)
 - **Automatic Symbology** - Flow direction, stream order, flow accumulation
 - **Pure Python** - No binary dependencies
 - **Cross-Platform** - Windows, Linux, macOS
@@ -61,7 +61,7 @@ DEM → Fill Depressions → Flow Direction → Flow Accumulation → Extract St
 
 | Tool                      | Description                                   |
 | ------------------------- | --------------------------------------------- |
-| **Flow Direction**        | D8 flow direction with ArcGIS encoding        |
+| **Flow Direction**        | D8 flow direction with standard encoding      |
 | **Flow Accumulation**     | Upstream contributing area                    |
 | **Watershed Delineation** | Basin boundaries from pour points             |
 | **Depression Handling**   | Fill/breach sinks for continuous flow         |
@@ -103,9 +103,9 @@ DEM → Fill Depressions → Flow Direction → Flow Accumulation → Extract St
 | **Valley Extraction**       | Identify valley bottoms                     |
 | **Join Stream Links**       | Fill gaps in stream networks                |
 
-### 4. Hydrology - ArcGIS Like (12 tools)
+### 4. Hydrology - Structured Workflow (12 tools)
 
-Structured workflow tools mimicking ArcHydro/Spatial Analyst:
+Organized workflow tools following standard hydrology analysis patterns:
 
 - Basin, Fill, Flow Direction, Flow Accumulation
 - Flow Distance, Flow Length, Sink, Snap Pour Point
@@ -166,13 +166,13 @@ processing.run("mas_spatial_analysis_tool:extract_streams", {
 
 ## 📋 Technical Specifications
 
-| Specification   | Value              |
-| --------------- | ------------------ |
-| QGIS Version    | 3.0 - 3.99         |
-| Python          | 3.x (QGIS bundled) |
-| NoData Value    | -9999              |
-| Flow Direction  | D8 (ESRI encoding) |
-| Stream Ordering | Strahler, Shreve   |
+| Specification   | Value                  |
+| --------------- | ---------------------- |
+| QGIS Version    | 3.0 - 3.99             |
+| Python          | 3.x (QGIS bundled)     |
+| NoData Value    | -9999                  |
+| Flow Direction  | D8 (Standard encoding) |
+| Stream Ordering | Strahler, Shreve       |
 
 ### D8 Flow Direction Encoding
 
@@ -210,7 +210,7 @@ processing.run("mas_spatial_analysis_tool:extract_streams", {
 - **NEW**: Flow Direction Method selector
 - **IMPROVED**: Extract Streams with expression display
 - **IMPROVED**: Standardized NoData (-9999)
-- **IMPROVED**: ArcGIS-style symbology
+- **IMPROVED**: Professional symbology
 
 ### v1.0.0 (2024-11-15)
 - Initial release

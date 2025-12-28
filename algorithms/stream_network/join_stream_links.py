@@ -35,7 +35,7 @@ class JoinStreamLinksAlgorithm(QgsProcessingAlgorithm):
     OUTPUT = 'OUTPUT'
     
     THRESHOLD_TYPES = ['Pixels', 'Map Units (Length)']
-    FLOW_DIR_METHODS = ['D8 (ArcGIS/ESRI Standard)', 'Rho8', 'D-Infinity (DINF)', 'MFD (Multiple Flow Direction)']
+    FLOW_DIR_METHODS = ['D8 (Standard Encoding)', 'Rho8', 'D-Infinity (DINF)', 'MFD (Multiple Flow Direction)']
     
     def __init__(self):
         super().__init__()
@@ -268,7 +268,7 @@ class JoinStreamLinksAlgorithm(QgsProcessingAlgorithm):
         3. If we hit another stream cell within threshold, fill the gap
         
         Supports different flow direction methods:
-        - 0: D8 (ArcGIS/ESRI Standard) - codes: 1,2,4,8,16,32,64,128
+        - 0: D8 (Standard Encoding) - codes: 1,2,4,8,16,32,64,128
         - 1: Rho8 - similar to D8 but with random tie-breaking
         - 2: D-Infinity - continuous angles (0-360), needs special handling
         - 3: MFD - Multiple flow direction, not single-path
@@ -278,7 +278,7 @@ class JoinStreamLinksAlgorithm(QgsProcessingAlgorithm):
         rows, cols = streams.shape
         joined = streams.copy()
         
-        # Direction mappings for D8 (ArcGIS/ESRI standard)
+        # Direction mappings for D8 (Standard encoding)
         # E=1, SE=2, S=4, SW=8, W=16, NW=32, N=64, NE=128
         drs = np.array([0, 1, 1, 1, 0, -1, -1, -1])
         dcs = np.array([1, 1, 0, -1, -1, -1, 0, 1])
