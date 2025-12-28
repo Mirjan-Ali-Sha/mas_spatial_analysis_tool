@@ -84,6 +84,8 @@ qgis_diagnostic.py
 generate_readme_table.py
 plugin_structure.txt
 LOG_INSTRUCTIONS.txt
+ALGORITHMS.md
+package_plugin.py
 function_list.txt
 
 # ============================================
@@ -93,6 +95,7 @@ mas_algorithm.py
 mas_utils.py
 structured_tools_new_old.py
 hydrology_struct_old/
+release/
 
 # ============================================
 # Logs and Temporary Files

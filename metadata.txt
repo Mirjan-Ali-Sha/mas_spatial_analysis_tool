@@ -2,42 +2,63 @@
 name=MAS Spatial Analysis Tool
 qgisMinimumVersion=3.0
 qgisMaximumVersion=3.99
-description=Advanced hydrological and geomorphometric analysis tools
+description=Comprehensive DEM analysis toolkit with 45+ hydrological, geomorphometric, and stream network tools. Numba-accelerated for fast processing.
 version=1.1.0
 author=Mirjan Ali Sha
 email=mastools.help@gmail.com
 license=GNU GPL v3
 
-about=Comprehensive processing toolbox providing 177 optimized algorithms for:
-    - Geomorphometric Analysis (92 tools)
-    - Hydrological Analysis (61 tools)
-    - Hydrology Analysis - ArcGIS Like (12 tools) mimicking ArcHydro workflow
-    - Stream Network Analysis (24 tools)
+about=Professional-grade terrain analysis toolkit for QGIS featuring:
     
-    Features Numba-accelerated algorithms for fast processing on large DEMs.
-    Includes ArcGIS-style default symbology for hydrology outputs.
+    • Hydrological Analysis: D8 flow direction, flow accumulation, watershed delineation, depression filling, flow indices (TWI, SPI), flow distance/length, basin analysis
+    
+    • Geomorphometric Analysis: Slope, aspect, curvature, hillshade, roughness, TPI, openness, visibility analysis, hypsometric analysis
+    
+    • Stream Network: Stream extraction, Strahler/Shreve ordering, stream links, vectorization, gap joining, valley extraction
+    
+    • ArcGIS-Like Workflow: Structured tools mimicking ArcHydro/Spatial Analyst workflow
+    
+    Key Features:
+    - Numba JIT acceleration for 10-100x faster processing
+    - ArcGIS-compatible D8 flow direction encoding
+    - Automatic symbology for flow direction and stream order
+    - NoData handling with -9999 standard
+    
+    How to Use:
+    1. Open Processing Toolbox (Ctrl+Alt+T)
+    2. Expand "MAS Spatial Analysis Tool"
+    3. Select algorithm category (Hydrological, Geomorphometric, Stream Network)
+    4. Double-click tool to run
+    5. Typical workflow: Fill DEM → Flow Direction → Flow Accumulation → Extract Streams
 
-tracker=https://github.com/Mirjan-Ali-Sha/mas_geospatial_tools/issues
-repository=https://github.com/Mirjan-Ali-Sha/mas_geospatial_tools
-homepage=https://github.com/Mirjan-Ali-Sha/mas_geospatial_tools/wiki
+tracker=https://github.com/Mirjan-Ali-Sha/mas_spatial_analysis_tool/issues
+repository=https://github.com/Mirjan-Ali-Sha/mas_spatial_analysis_tool
+homepage=https://github.com/Mirjan-Ali-Sha/mas_spatial_analysis_tool/wiki
 
 category=Processing
 icon=icons/mas_icon.svg
 experimental=False
 deprecated=False
 
-tags=hydrology,geomorphology,terrain,analysis,DEM,watershed,stream,processing,hydrological,arcgis,archydro,stream-network,stream-analysis,stream-network-analysis,morphometry,morphometric-analysis,geomorphometric-analysis,geomorphometric-analysis,geomorphometry,geomorphometric
+tags=hydrology,geomorphology,terrain,DEM,watershed,stream,flow,accumulation,direction,slope,aspect,curvature,hillshade,processing,arcgis,archydro,numba
 
-changelog=1.1.0
-    - Renamed 'Hydrological Analysis - Struct' to 'Hydrology Analysis - ArcGIS Like'
-    - Added 'Force all edge cells to flow outwards' option in Flow Direction
-    - Added ArcGIS-style default symbology for hydrology outputs
-    - Improved Numba caching for faster repeated runs
+changelog=
+    1.1.0 (2024-12-28)
+    - NEW: Join Stream Links algorithm for gap filling in stream networks
+    - NEW: Flow Direction Method selector (D8, Rho8, DINF, MFD)
+    - NEW: Comprehensive algorithm documentation (ALGORITHMS.md)
+    - IMPROVED: Extract Streams now shows expression like ArcGIS Raster Calculator
+    - IMPROVED: Standardized NoData value to -9999 across all algorithms
+    - IMPROVED: ArcGIS-style symbology for Flow Direction (8-color directional)
+    - IMPROVED: Stream Order symbology with 10-color gradient
+    - IMPROVED: Flow Accumulation dynamic symbology based on data range
+    - FIXED: Stream extraction now properly outputs 0/1 binary raster
+    - FIXED: Symbology loading for all hydrological outputs
     
-    1.0.0
+    1.0.0 (2024-11-15)
     - Initial release
-    - 92 Geomorphometric analysis tools
-    - 61 Hydrological analysis tools
-    - 12 Hydrological analysis tools (ArcGIS workflow style)
-    - 24 Stream network analysis tools
-
+    - 11 Geomorphometric analysis tools
+    - 15 Hydrological analysis tools
+    - 12 Structured hydrology tools (ArcGIS-like workflow)
+    - 8 Stream network analysis tools
+    - Numba-accelerated algorithms

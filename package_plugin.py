@@ -8,13 +8,29 @@ Usage:
     python package_plugin.py
 
 Output:
-    mas_spatial_analysis_tool.zip (in the same directory)
+    release/mas_spatial_analysis_tool_<version>.zip
 """
 
 import os
 import zipfile
 import sys
 from datetime import datetime
+
+def get_version_from_metadata(plugin_dir):
+    """Extract version number from metadata.txt"""
+    metadata_path = os.path.join(plugin_dir, 'metadata.txt')
+    version = "0.0.0"
+    
+    try:
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('version='):
+                    version = line.split('=')[1].strip()
+                    break
+    except Exception as e:
+        print(f"Warning: Could not read version from metadata.txt: {e}")
+    
+    return version
 
 def package_plugin():
     """Create a clean ZIP package of the plugin for distribution."""
@@ -23,16 +39,24 @@ def package_plugin():
     plugin_dir = os.path.dirname(os.path.abspath(__file__))
     plugin_name = os.path.basename(plugin_dir)
     
-    # Output zip file with timestamp option
-    zip_filename = f"{plugin_name}.zip"
-    zip_path = os.path.join(plugin_dir, zip_filename)
+    # Get version from metadata.txt
+    version = get_version_from_metadata(plugin_dir)
+    
+    # Create release folder if it doesn't exist
+    release_dir = os.path.join(plugin_dir, 'release')
+    os.makedirs(release_dir, exist_ok=True)
+    
+    # Output zip file with version number
+    zip_filename = f"{plugin_name}_{version}.zip"
+    zip_path = os.path.join(release_dir, zip_filename)
     
     print("=" * 60)
     print(f"MAS Spatial Analysis Tool - Plugin Packager")
     print("=" * 60)
     print(f"Plugin: {plugin_name}")
+    print(f"Version: {version}")
     print(f"Source: {plugin_dir}")
-    print(f"Output: {zip_filename}")
+    print(f"Output: release/{zip_filename}")
     print("-" * 60)
     
     # Files and directories to exclude from packaging
@@ -49,7 +73,7 @@ def package_plugin():
         '.gitattributes',
         
         # Package output
-        zip_filename,
+        'release',
         'package_plugin.py',
         
         # Development/Test files
@@ -69,6 +93,7 @@ def package_plugin():
         'function_list.txt',
         'CHANGELOG.md',
         'CONTRIBUTING.md',
+        'ALGORITHMS.md',
         'ALGORITHM_LIST.md',
         
         # Obsolete/Old files
@@ -158,4 +183,3 @@ def package_plugin():
 if __name__ == '__main__':
     success = package_plugin()
     sys.exit(0 if success else 1)
-
