@@ -1,0 +1,131 @@
+# MAS Spatial Analysis Tool - .gitignore
+
+# ============================================
+# Python
+# ============================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ============================================
+# Virtual Environments
+# ============================================
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.conda/
+
+# ============================================
+# IDE/Editor Settings
+# ============================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+
+# ============================================
+# Testing
+# ============================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# ============================================
+# Package Distribution
+# ============================================
+*.zip
+*.tar.gz
+*.whl
+
+# ============================================
+# Development/Debug Files
+# ============================================
+compare_flow_dir.py
+verify_*.py
+debug_*.py
+check_*.py
+test_*.py
+qgis_diagnostic.py
+generate_readme_table.py
+plugin_structure.txt
+LOG_INSTRUCTIONS.txt
+function_list.txt
+
+# ============================================
+# Obsolete/Old Files
+# ============================================
+mas_algorithm.py
+mas_utils.py
+structured_tools_new_old.py
+hydrology_struct_old/
+
+# ============================================
+# Logs and Temporary Files
+# ============================================
+*.log
+*.tmp
+*.bak
+*.orig
+*.cache
+.DS_Store
+Thumbs.db
+
+# ============================================
+# QGIS Generated Files
+# ============================================
+*.qml~
+*.pyc
+*.pyo
+
+# ============================================
+# Data Files (do not commit)
+# ============================================
+*.tif
+*.tiff
+*.img
+*.dem
+*.asc
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
+*.qix
+*.gpkg

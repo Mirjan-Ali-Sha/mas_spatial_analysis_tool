@@ -1,0 +1,43 @@
+[general]
+name=MAS Spatial Analysis Tool
+qgisMinimumVersion=3.0
+qgisMaximumVersion=3.99
+description=Advanced hydrological and geomorphometric analysis tools
+version=1.1.0
+author=Mirjan Ali Sha
+email=mastools.help@gmail.com
+license=GNU GPL v3
+
+about=Comprehensive processing toolbox providing 177 optimized algorithms for:
+    - Geomorphometric Analysis (92 tools)
+    - Hydrological Analysis (61 tools)
+    - Hydrology Analysis - ArcGIS Like (12 tools) mimicking ArcHydro workflow
+    - Stream Network Analysis (24 tools)
+    
+    Features Numba-accelerated algorithms for fast processing on large DEMs.
+    Includes ArcGIS-style default symbology for hydrology outputs.
+
+tracker=https://github.com/Mirjan-Ali-Sha/mas_geospatial_tools/issues
+repository=https://github.com/Mirjan-Ali-Sha/mas_geospatial_tools
+homepage=https://github.com/Mirjan-Ali-Sha/mas_geospatial_tools/wiki
+
+category=Processing
+icon=icons/mas_icon.svg
+experimental=False
+deprecated=False
+
+tags=hydrology,geomorphology,terrain,analysis,DEM,watershed,stream,processing,hydrological,arcgis,archydro,stream-network,stream-analysis,stream-network-analysis,morphometry,morphometric-analysis,geomorphometric-analysis,geomorphometric-analysis,geomorphometry,geomorphometric
+
+changelog=1.1.0
+    - Renamed 'Hydrological Analysis - Struct' to 'Hydrology Analysis - ArcGIS Like'
+    - Added 'Force all edge cells to flow outwards' option in Flow Direction
+    - Added ArcGIS-style default symbology for hydrology outputs
+    - Improved Numba caching for faster repeated runs
+    
+    1.0.0
+    - Initial release
+    - 92 Geomorphometric analysis tools
+    - 61 Hydrological analysis tools
+    - 12 Hydrological analysis tools (ArcGIS workflow style)
+    - 24 Stream network analysis tools
+
