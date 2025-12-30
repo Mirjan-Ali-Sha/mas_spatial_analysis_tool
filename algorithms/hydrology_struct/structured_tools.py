@@ -261,14 +261,8 @@ class StructFlowAccumulationAlgorithm(FlowAccumulationAlgorithm):
                     context.setLayersToLoadOnCompletion({})
                 else:
                     feedback.pushInfo('Warning: Could not load styled layer')
-            else:
-                # Just save .qml for future use
-                temp_layer = QgsRasterLayer(output_path, 'temp_for_style')
-                if temp_layer.isValid():
-                    apply_flow_accumulation_symbology(temp_layer)
-                    temp_layer.saveDefaultStyle()
-                    feedback.pushInfo('Flow Accumulation .qml style file saved')
                     
+
         except Exception as e:
             feedback.pushInfo(f'Note: Could not apply symbology: {e}')
         

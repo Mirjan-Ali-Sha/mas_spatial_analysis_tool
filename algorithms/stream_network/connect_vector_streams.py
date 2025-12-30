@@ -1,14 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 algorithms/stream_network/connect_vector_streams.py
-Connect Vector Stream Network (Join Gaps)
+Connect Vector Stream Network (Join Gaps) - Restructured Algorithm
+
+New approach:
+1. Extend all line endpoints by threshold distance
+2. Find and break lines at intersection points
+3. Delete very small line segments (optional, enabled by default)
 """
 
-import math
 from qgis.core import (
     QgsProcessingAlgorithm,
     QgsProcessingParameterFeatureSource,
-    QgsProcessingParameterRasterLayer,
     QgsProcessingParameterNumber,
     QgsProcessingParameterBoolean,
     QgsProcessingParameterEnum,
@@ -20,20 +23,19 @@ from qgis.core import (
     QgsWkbTypes,
     QgsProcessing,
     QgsSpatialIndex,
-    QgsDistanceArea
+    QgsFeatureRequest
 )
-from ...core.dem_utils import DEMProcessor
+import math
+
 
 class ConnectVectorStreamsAlgorithm(QgsProcessingAlgorithm):
-    """Connect vector streams by bridging gaps data."""
+    """Connect vector streams by extending lines, breaking at crossings, and cleaning."""
     
     INPUT_STREAMS = 'INPUT_STREAMS'
-    FLOW_DIR = 'FLOW_DIR'
-    GAP_THRESHOLD = 'GAP_THRESHOLD'
-    GAP_UNIT = 'GAP_UNIT'
-    REMOVE_SMALL = 'REMOVE_SMALL'
+    EXTEND_DISTANCE = 'EXTEND_DISTANCE'
+    DISTANCE_UNIT = 'DISTANCE_UNIT'
+    DELETE_SMALL = 'DELETE_SMALL'
     SMALL_THRESHOLD = 'SMALL_THRESHOLD'
-    SMALL_UNIT = 'SMALL_UNIT'
     OUTPUT = 'OUTPUT'
     
     UNIT_OPTIONS = ['Map Units', 'Meters']
@@ -58,10 +60,18 @@ class ConnectVectorStreamsAlgorithm(QgsProcessingAlgorithm):
     
     def shortHelpString(self):
         return """
-        Joins gaps between stream lines within a specified threshold.
+        Connects gaps between stream lines using an extend-break-clean approach.
         
-        Optional: Can remove small stream segments before processing to reduce noise.
-        Optional: Uses Flow Direction to prioritize downstream connections.
+        Algorithm steps:
+        1. Extend all line endpoints by the specified distance
+        2. Find intersection points where extended lines cross
+        3. Break lines at intersection points to create proper junctions
+        4. Optionally delete very small line segments (cleaning step)
+        
+        Parameters:
+        - Extend Distance: How far to extend line endpoints
+        - Delete Small Lines: Remove segments shorter than threshold (recommended)
+        - Small Line Threshold: Minimum length to keep (default: half of extend distance)
         """
     
     def initAlgorithm(self, config=None):
@@ -74,17 +84,9 @@ class ConnectVectorStreamsAlgorithm(QgsProcessingAlgorithm):
         )
         
         self.addParameter(
-            QgsProcessingParameterRasterLayer(
-                self.FLOW_DIR,
-                'Flow Direction Raster (Optional)',
-                optional=True
-            )
-        )
-        
-        self.addParameter(
             QgsProcessingParameterNumber(
-                self.GAP_THRESHOLD,
-                'Gap Threshold (Map Units)',
+                self.EXTEND_DISTANCE,
+                'Extend Distance (threshold for gap joining)',
                 type=QgsProcessingParameterNumber.Double,
                 defaultValue=10.0,
                 minValue=0.0
@@ -93,38 +95,29 @@ class ConnectVectorStreamsAlgorithm(QgsProcessingAlgorithm):
         
         self.addParameter(
             QgsProcessingParameterEnum(
-                self.GAP_UNIT,
-                'Gap Threshold Unit',
+                self.DISTANCE_UNIT,
+                'Distance Unit',
                 options=self.UNIT_OPTIONS,
-                defaultValue=0 # Map Units
+                defaultValue=0  # Map Units
             )
         )
         
         self.addParameter(
             QgsProcessingParameterBoolean(
-                self.REMOVE_SMALL,
-                'Remove Small Streams before connecting',
-                defaultValue=False
+                self.DELETE_SMALL,
+                'Delete small line segments after processing',
+                defaultValue=True
             )
         )
         
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.SMALL_THRESHOLD,
-                'Small Stream Threshold (Map Units)',
+                'Minimum segment length to keep (0 = use half of extend distance)',
                 type=QgsProcessingParameterNumber.Double,
-                defaultValue=100.0,
+                defaultValue=0.0,
                 minValue=0.0,
                 optional=True
-            )
-        )
-        
-        self.addParameter(
-            QgsProcessingParameterEnum(
-                self.SMALL_UNIT,
-                'Small Stream Threshold Unit',
-                options=self.UNIT_OPTIONS,
-                defaultValue=0 # Map Units
             )
         )
         
@@ -139,219 +132,311 @@ class ConnectVectorStreamsAlgorithm(QgsProcessingAlgorithm):
     def processAlgorithm(self, parameters, context, feedback):
         try:
             source = self.parameterAsSource(parameters, self.INPUT_STREAMS, context)
-            flow_dir_layer = self.parameterAsRasterLayer(parameters, self.FLOW_DIR, context)
-            gap_threshold = self.parameterAsDouble(parameters, self.GAP_THRESHOLD, context)
-            gap_unit = self.parameterAsEnum(parameters, self.GAP_UNIT, context)
-            remove_small = self.parameterAsBool(parameters, self.REMOVE_SMALL, context)
+            extend_dist = self.parameterAsDouble(parameters, self.EXTEND_DISTANCE, context)
+            unit_idx = self.parameterAsEnum(parameters, self.DISTANCE_UNIT, context)
+            delete_small = self.parameterAsBool(parameters, self.DELETE_SMALL, context)
             small_threshold = self.parameterAsDouble(parameters, self.SMALL_THRESHOLD, context)
-            small_unit = self.parameterAsEnum(parameters, self.SMALL_UNIT, context)
             
             if source is None:
                 raise QgsProcessingException('Input streams required')
             
-            # Helper for unit conversion
-            def get_map_units(value, unit_idx, crs):
-                if unit_idx == 0: # Map Units
-                    return value
-                elif unit_idx == 1: # Meters
-                    if crs.isGeographic():
-                        # Rough conversion for thresholding
-                        # 1 deg ~ 111320m
-                        return value / 111320.0
-                    else:
-                        return value
-                return value
-
-            # Flow Direction process (for connectivity check only)
-            flow_proc = None
-            if flow_dir_layer:
-                flow_proc = DEMProcessor(flow_dir_layer.source())
-
             crs = source.sourceCrs()
             
-            # Convert Thresholds to Map Units for processing
-            try:
-                final_gap_threshold = get_map_units(gap_threshold, gap_unit, crs)
-                final_small_threshold = get_map_units(small_threshold, small_unit, crs)
-                
-                if gap_unit == 1 and crs.isGeographic():
-                     feedback.reportError("Warning: Using Meters with Geographic CRS is approximate.")
-            except Exception as e:
-                raise QgsProcessingException(str(e))
+            # Unit conversion
+            if unit_idx == 1 and crs.isGeographic():
+                # Convert meters to degrees (approximate)
+                extend_dist = extend_dist / 111320.0
+                small_threshold = small_threshold / 111320.0
+                feedback.reportError("Warning: Using Meters with Geographic CRS is approximate.")
             
-            feedback.pushInfo(f'Gap Threshold: {final_gap_threshold} map units')
-            if remove_small:
-                feedback.pushInfo(f'Small Threshold: {final_small_threshold} map units')
-
+            # Default small threshold to half of extend distance
+            if small_threshold <= 0:
+                small_threshold = extend_dist / 2.0
             
-            feedback.pushInfo('Loading features...')
+            feedback.pushInfo(f'Extend distance: {extend_dist} map units')
+            feedback.pushInfo(f'Small threshold: {small_threshold} map units')
             
-            # Load all features
-            features = list(source.getFeatures())
-            # Load all features
-            features = list(source.getFeatures())
-            
-            # Optional Cleaning
-            if remove_small:
-                feedback.pushInfo(f'Removing streams < {final_small_threshold}...')
-                cleaned_features = []
-                for f in features:
-                    if f.geometry() and f.geometry().length() >= final_small_threshold:
-                        cleaned_features.append(f)
-                features = cleaned_features
-                feedback.pushInfo(f'{len(features)} streams remaining after cleaning.')
-                
-            # Create Spatial Index
-            index = QgsSpatialIndex()
-            feature_map = {}
-            for f in features:
-                index.addFeature(f)
-                feature_map[f.id()] = f
-                
             # Create output sink
             (sink, dest_id) = self.parameterAsSink(
                 parameters, self.OUTPUT, context,
                 source.fields(), QgsWkbTypes.LineString, crs
             )
             
-            # Flow Direction helper
-            flow_data = None
-            gt = None
-            cs_x = None
-            cs_y = None
-            if flow_dir_layer:
-                proc = DEMProcessor(flow_dir_layer.source())
-                flow_data = proc.array
-                gt = proc.geotransform
-                cs_x = proc.cellsize_x
-                
-            # Helper: Get endpoints
-            def get_endpoints(geom):
-                if geom.isMultipart():
-                    lines = geom.asMultiPolyline()
-                    pts = []
-                    for l in lines:
-                        if l:
-                            pts.append(l[0])
-                            pts.append(l[-1])
-                    return pts
-                else:
-                    l = geom.asPolyline()
-                    if l:
-                        return [l[0], l[-1]]
-                    return []
-
-            # 1. Add all original features
-            for f in features:
-                sink.addFeature(f)
-                
-            # 2. Find connections
-            feedback.pushInfo('Connecting gaps...')
-            new_segments = []
+            if sink is None:
+                raise QgsProcessingException('Failed to create output')
             
-            # To avoid cycles or double connections, track processed?
-            # Simple approach: Iterate all endpoints, find nearest neighbor. 
-            # If distance < threshold AND (optional) flow matches, create segment.
-            
-            count = 0 
+            # Step 1: Load all features and extend their endpoints
+            feedback.pushInfo('Step 1: Extending line endpoints...')
+            features = list(source.getFeatures())
             total = len(features)
             
-            for f in features:
-                if feedback.isCanceled(): break
-                
-                geom = f.geometry()
-                endpoints = get_endpoints(geom)
-                
-                for pt in endpoints:
-                    # Search nearest
-                    # neighbor_ids = index.nearestNeighbor(pt, 2) # 2 because self is one
-                    # Range search is better
-                    neighbor_ids = index.nearestNeighbor(pt, 5) # Check a few
-                    
-                    best_target = None
-                    min_dist = float('inf')
-                    
-                    for nid in neighbor_ids:
-                        if nid == f.id(): continue
-                        
-                        target_feat = feature_map[nid]
-                        target_geom = target_feat.geometry()
-                        
-                        # Distance from pt to geometry
-                        # We want to connect to endpoints usually, but ANY point on line is OK?
-                        # User said "join gaps between each line joints".
-                        # Usually means endpoint to endpoint, or endpoint to line.
-                        
-                        dist = target_geom.distance(QgsGeometry.fromPointXY(pt))
-                        
-                        
-                        if dist < final_gap_threshold and dist < min_dist:
-                            # Candidate found
-                            # Check Flow Direction
-                            valid_flow = True
-                            if flow_data is not None:
-                                # Check if pt flows towards target
-                                # Get flow direction at pt
-                                try:
-                                    c = int((pt.x() - gt[0]) / gt[1])
-                                    r = int((pt.y() - gt[3]) / gt[5])
-                                    if 0 <= r < flow_data.shape[0] and 0 <= c < flow_data.shape[1]:
-                                        d = flow_data[r, c]
-                                        # Convert d to angle (approx)
-                                        # N=64, NE=128, E=1, SE=2, S=4, SW=8, W=16, NW=32
-                                        # Just check if moving one step in 'd' gets closer to target?
-                                        # Vector from pt to closest point on target
-                                        closest_pt = target_geom.closestVertex(pt)[0] # Vertex or nearest point?
-                                        # nearestPoint() returns QgsGeometry
-                                        closest_geom_pt = target_geom.nearestPoint(QgsGeometry.fromPointXY(pt)).asPoint()
-                                        
-                                        dx = closest_geom_pt.x() - pt.x()
-                                        dy = closest_geom_pt.y() - pt.y()
-                                        angle = math.degrees(math.atan2(dy, dx)) # -180 to 180. 0 is East.
-                                        
-                                        # Map flow codes to angles
-                                        # E=1 (0), SE=2 (-45), S=4 (-90), SW=8 (-135), W=16 (180), NW=32 (135), N=64 (90), NE=128 (45)
-                                        code_map = {
-                                            1: 0, 2: -45, 4: -90, 8: -135, 16: 180, 32: 135, 64: 90, 128: 45
-                                        }
-                                        
-                                        if d in code_map:
-                                            flow_angle = code_map[d]
-                                            diff = abs(angle - flow_angle)
-                                            if diff > 180: diff = 360 - diff
-                                            
-                                            if diff > 90: # Flows away
-                                                valid_flow = False
-                                except:
-                                    pass # Ignore flow check errors
-                            
-                            if valid_flow:
-                                min_dist = dist
-                                best_target = target_geom.nearestPoint(QgsGeometry.fromPointXY(pt)).asPoint()
-
-                    if best_target and min_dist > 0: # >0 to avoid self-snapped endpoints (cycles)
-                         # Create segment
-                         # Avoid duplicates?
-                         seg_geom = QgsGeometry.fromPolylineXY([pt, best_target])
-                         
-                         # Check if this segment already exists (approx)?
-                         # For now, just add. Duplicate clean up is another step.
-                         
-                         feat_new = QgsFeature()
-                         feat_new.setGeometry(seg_geom)
-                         # Set fields? Nulls likely.
-                         new_segments.append(feat_new)
-                
-                count += 1
-                if count % 100 == 0:
-                    feedback.setProgress(int(count/total * 100))
+            extended_geometries = []
             
-            # Add new bridge segments
-            feedback.pushInfo(f'Adding {len(new_segments)} connection segments...')
-            for f in new_segments:
-                sink.addFeature(f)
+            for i, feat in enumerate(features):
+                if feedback.isCanceled():
+                    break
                 
+                geom = feat.geometry()
+                if geom.isNull() or geom.isEmpty():
+                    continue
+                
+                extended_geom = self._extend_line_both_ends(geom, extend_dist)
+                extended_geometries.append({
+                    'original_feat': feat,
+                    'extended_geom': extended_geom
+                })
+                
+                feedback.setProgress(int((i / total) * 25))
+            
+            feedback.pushInfo(f'Extended {len(extended_geometries)} lines')
+            
+            # Step 2: Find all intersection points
+            feedback.pushInfo('Step 2: Finding intersection points...')
+            all_intersections = []
+            
+            for i in range(len(extended_geometries)):
+                if feedback.isCanceled():
+                    break
+                
+                geom_i = extended_geometries[i]['extended_geom']
+                
+                for j in range(i + 1, len(extended_geometries)):
+                    geom_j = extended_geometries[j]['extended_geom']
+                    
+                    if geom_i.intersects(geom_j):
+                        intersection = geom_i.intersection(geom_j)
+                        
+                        if not intersection.isNull() and not intersection.isEmpty():
+                            # Extract points from intersection
+                            pts = self._extract_points_from_geometry(intersection)
+                            for pt in pts:
+                                all_intersections.append({
+                                    'point': pt,
+                                    'line_indices': [i, j]
+                                })
+                
+                feedback.setProgress(25 + int((i / len(extended_geometries)) * 25))
+            
+            feedback.pushInfo(f'Found {len(all_intersections)} intersection points')
+            
+            # Step 3: Split lines at intersection points
+            feedback.pushInfo('Step 3: Breaking lines at intersections...')
+            all_segments = []
+            
+            for i, item in enumerate(extended_geometries):
+                if feedback.isCanceled():
+                    break
+                
+                geom = item['extended_geom']
+                original_feat = item['original_feat']
+                
+                # Collect all intersection points for this line
+                split_points = []
+                for isect in all_intersections:
+                    if i in isect['line_indices']:
+                        split_points.append(isect['point'])
+                
+                if split_points:
+                    # Split the geometry at these points
+                    segments = self._split_line_at_points(geom, split_points)
+                    for seg in segments:
+                        all_segments.append({
+                            'geometry': seg,
+                            'original_feat': original_feat
+                        })
+                else:
+                    # No splits needed
+                    all_segments.append({
+                        'geometry': geom,
+                        'original_feat': original_feat
+                    })
+                
+                feedback.setProgress(50 + int((i / len(extended_geometries)) * 25))
+            
+            feedback.pushInfo(f'Created {len(all_segments)} segments')
+            
+            # Step 4: Optionally delete small segments
+            if delete_small:
+                feedback.pushInfo(f'Step 4: Removing segments shorter than {small_threshold}...')
+                filtered_segments = []
+                removed_count = 0
+                
+                for seg in all_segments:
+                    if seg['geometry'].length() >= small_threshold:
+                        filtered_segments.append(seg)
+                    else:
+                        removed_count += 1
+                
+                feedback.pushInfo(f'Removed {removed_count} small segments')
+                all_segments = filtered_segments
+            
+            # Step 5: Write output features
+            feedback.pushInfo('Writing output features...')
+            
+            for i, seg in enumerate(all_segments):
+                if feedback.isCanceled():
+                    break
+                
+                feat_out = QgsFeature()
+                feat_out.setGeometry(seg['geometry'])
+                
+                # Copy attributes from original feature if fields exist
+                if source.fields().count() > 0:
+                    feat_out.setFields(source.fields())
+                    try:
+                        feat_out.setAttributes(seg['original_feat'].attributes())
+                    except:
+                        pass
+                
+                sink.addFeature(feat_out)
+                
+                feedback.setProgress(75 + int((i / len(all_segments)) * 25))
+            
+            feedback.pushInfo(f'Output: {len(all_segments)} features')
+            
             return {self.OUTPUT: dest_id}
             
         except Exception as e:
             raise QgsProcessingException(f'Error: {str(e)}')
+    
+    def _extend_line_both_ends(self, geom, distance):
+        """Extend a line geometry on both ends by the specified distance."""
+        if geom.isMultipart():
+            # Handle multipart
+            lines = geom.asMultiPolyline()
+            extended_lines = []
+            for line in lines:
+                extended = self._extend_polyline(line, distance)
+                extended_lines.append(extended)
+            return QgsGeometry.fromMultiPolylineXY(extended_lines)
+        else:
+            line = geom.asPolyline()
+            extended = self._extend_polyline(line, distance)
+            return QgsGeometry.fromPolylineXY(extended)
+    
+    def _extend_polyline(self, points, distance):
+        """Extend a polyline (list of QgsPointXY) on both ends."""
+        if len(points) < 2:
+            return points
+        
+        # Extend start
+        p0, p1 = points[0], points[1]
+        dx = p0.x() - p1.x()
+        dy = p0.y() - p1.y()
+        length = math.sqrt(dx * dx + dy * dy)
+        
+        if length > 0:
+            new_start = QgsPointXY(
+                p0.x() + (dx / length) * distance,
+                p0.y() + (dy / length) * distance
+            )
+        else:
+            new_start = p0
+        
+        # Extend end
+        pn, pn1 = points[-1], points[-2]
+        dx = pn.x() - pn1.x()
+        dy = pn.y() - pn1.y()
+        length = math.sqrt(dx * dx + dy * dy)
+        
+        if length > 0:
+            new_end = QgsPointXY(
+                pn.x() + (dx / length) * distance,
+                pn.y() + (dy / length) * distance
+            )
+        else:
+            new_end = pn
+        
+        # Create extended polyline
+        extended = [new_start] + list(points) + [new_end]
+        return extended
+    
+    def _extract_points_from_geometry(self, geom):
+        """Extract QgsPointXY objects from a geometry (point, multipoint, or vertices)."""
+        points = []
+        
+        if geom.type() == QgsWkbTypes.PointGeometry:
+            if geom.isMultipart():
+                for pt in geom.asMultiPoint():
+                    points.append(pt)
+            else:
+                points.append(geom.asPoint())
+        elif geom.type() == QgsWkbTypes.LineGeometry:
+            # For line intersections, use the centroid or all vertices
+            if geom.isMultipart():
+                for line in geom.asMultiPolyline():
+                    for pt in line:
+                        points.append(pt)
+            else:
+                for pt in geom.asPolyline():
+                    points.append(pt)
+        
+        return points
+    
+    def _split_line_at_points(self, geom, split_points):
+        """Split a line geometry at the given points."""
+        if geom.isMultipart():
+            lines = geom.asMultiPolyline()
+        else:
+            lines = [geom.asPolyline()]
+        
+        all_segments = []
+        
+        for line in lines:
+            if len(line) < 2:
+                continue
+            
+            # Create temporary geometry for distance calculations
+            line_geom = QgsGeometry.fromPolylineXY(line)
+            
+            # Calculate distances along line for each split point
+            splits_with_dist = []
+            for pt in split_points:
+                pt_geom = QgsGeometry.fromPointXY(pt)
+                dist_along = line_geom.lineLocatePoint(pt_geom)
+                if dist_along > 0 and dist_along < line_geom.length():
+                    splits_with_dist.append((dist_along, pt))
+            
+            # Sort by distance
+            splits_with_dist.sort(key=lambda x: x[0])
+            
+            if not splits_with_dist:
+                # No valid splits on this line
+                all_segments.append(line_geom)
+                continue
+            
+            # Split the line
+            prev_dist = 0
+            for dist, pt in splits_with_dist:
+                if dist > prev_dist:
+                    # Extract segment from prev_dist to dist
+                    seg = self._extract_line_segment(line_geom, prev_dist, dist)
+                    if seg and not seg.isEmpty():
+                        all_segments.append(seg)
+                    prev_dist = dist
+            
+            # Add final segment
+            if prev_dist < line_geom.length():
+                seg = self._extract_line_segment(line_geom, prev_dist, line_geom.length())
+                if seg and not seg.isEmpty():
+                    all_segments.append(seg)
+        
+        return all_segments
+    
+    def _extract_line_segment(self, line_geom, start_dist, end_dist):
+        """Extract a segment of a line between two distances along it."""
+        try:
+            # Get interpolated points at start and end distances
+            start_pt = line_geom.interpolate(start_dist)
+            end_pt = line_geom.interpolate(end_dist)
+            
+            if start_pt.isNull() or end_pt.isNull():
+                return None
+            
+            # Simple approach: create line from start to end point
+            # For more accuracy, we should include intermediate vertices
+            pts = [start_pt.asPoint(), end_pt.asPoint()]
+            
+            return QgsGeometry.fromPolylineXY(pts)
+        except:
+            return None

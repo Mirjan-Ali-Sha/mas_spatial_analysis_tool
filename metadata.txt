@@ -3,7 +3,7 @@ name=MAS Spatial Analysis Tool
 qgisMinimumVersion=3.0
 qgisMaximumVersion=3.99
 description=Comprehensive DEM analysis toolkit with 45+ hydrological, geomorphometric, and stream network tools. Numba-accelerated for fast processing.
-version=1.1.0
+version=1.2.0
 author=Mirjan Ali Sha
 email=mastools.help@gmail.com
 license=GNU GPL v3
@@ -40,10 +40,18 @@ icon=icons/mas_icon.png
 experimental=False
 deprecated=False
 
-tags=hydrology,geomorphology,terrain,DEM,watershed,stream,flow,accumulation,direction,slope,aspect,curvature,hillshade,processing,spatial-analysis,numba
+tags=hydrology,geomorphology,terrain,DEM,watershed,stream,flow,accumulation,direction,slope,aspect,curvature,hillshade,processing,spatial-analysis,numba,hydrological-analysis,geomorphometric-analysis,stream-network-analysis
 
 changelog=
-    1.1.0 (2024-12-28)
+    1.2.0 (2026-01-01)
+    - FIXED: FlowRouter.join_stream_gaps() method now accessible (critical structure fix)
+    - FIXED: "Raster to Vector Streams (with Gap Filling)" now works correctly
+    - IMPROVED: No longer creates .qml files when "Open output file" is unchecked
+    - IMPROVED: Connect Vector Streams algorithm restructured with extend-break-clean approach
+    - IMPROVED: FlowRouter class methods properly organized
+    
+    1.1.0 (2025-12-28)
+
     - NEW: Join Stream Links algorithm for gap filling in stream networks
     - NEW: Flow Direction Method selector (D8, Rho8, DINF, MFD)
     - NEW: Comprehensive algorithm documentation (ALGORITHMS.md)

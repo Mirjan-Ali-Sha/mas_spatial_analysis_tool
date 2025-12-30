@@ -1138,27 +1138,21 @@ class FlowRouter:
         return result
 
     def assign_stream_link_ids(self, flow_dir, streams):
-        """Assign unique IDs to stream links."""
-        # This requires a Numba helper or graph traversal
-        # Placeholder for now: Label connected components
-        from scipy.ndimage import label, generate_binary_structure
+        """Assign unique IDs to stream links.
         
-        # Stream mask
-        mask = (streams > 0)
-        
-        # Label connected components (8-connectivity)
-        s = generate_binary_structure(2, 2)
-        labeled, num_features = label(mask, structure=s)
-        
-        # But stream links should be broken at junctions!
-        # Connected components merges junctions.
-        # We need to break at junctions (cells with >1 inflow from streams).
-        
-        # Calculate inflow from streams only
-        # ...
-        
-        # For now, return connected components as a proxy
-        return labeled.astype(np.int32)
+        Args:
+            flow_dir (np.ndarray): Flow direction raster
+            streams (np.ndarray): Stream raster
+            
+        Returns:
+            np.ndarray: Stream link ID raster
+        """
+        return _assign_stream_link_ids_numba(
+            flow_dir.astype(np.int32),
+            streams.astype(np.int32),
+            self.codes, self.drs, self.dcs
+        )
+
 
     def extract_stream_segments(self, streams):
         """Extract stream segments as list of polylines.
@@ -1258,7 +1252,186 @@ class FlowRouter:
         
         return segments
 
+    def delineate_basins(self, flow_dir):
+        """Delineate all drainage basins.
+        
+        Returns:
+            np.ndarray: Basin ID raster
+        """
+        return _delineate_basins_numba(
+            flow_dir.astype(np.int32),
+            self.codes, self.drs, self.dcs
+        )
+
+    def delineate_watersheds(self, seeds):
+        """Delineate watersheds from seed raster.
+        
+        Args:
+            seeds (np.ndarray): Raster with seed IDs (0 for non-seeds)
+            
+        Returns:
+            np.ndarray: Watershed ID raster
+        """
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+             if not np.all(np.isnan(self.dem)):
+                 self.flow_dir = self.d8_flow_direction()
+             else:
+                 raise ValueError("Flow direction required for watershed delineation")
+                 
+        return _delineate_watersheds_numba(
+            self.flow_dir.astype(np.int32),
+            seeds.astype(np.int32),
+            self.codes, self.drs, self.dcs
+        )
+
+    def find_no_flow_cells(self):
+        """Identify cells with no flow direction.
+        
+        Returns:
+            np.ndarray: Binary mask (1=No Flow)
+        """
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+             raise ValueError("Flow direction required")
+             
+        # D8 codes are > 0. 0 is usually sink/undefined.
+        return (self.flow_dir == 0).astype(np.int8)
+
+    def find_parallel_flow(self):
+        """Identify parallel flow patterns.
+        
+        Returns:
+            np.ndarray: Binary mask (1=Parallel Flow)
+        """
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+             raise ValueError("Flow direction required")
+             
+        return _find_parallel_flow_numba(
+            self.flow_dir.astype(np.int32),
+            self.codes, self.drs, self.dcs
+        )
+
+    def assign_tributary_ids(self, flow_dir, streams):
+        """Assign unique IDs to tributaries.
+        
+        Returns:
+            np.ndarray: Tributary ID raster
+        """
+        return self.assign_stream_link_ids(flow_dir, streams)
+
+    def join_stream_gaps(self, streams, gap_threshold):
+        """Join gaps in stream network (raster).
+        
+        Args:
+            streams (np.ndarray): Binary stream raster
+            gap_threshold (float): Max gap distance in map units
+            
+        Returns:
+            np.ndarray: Filled stream raster
+        """
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+             raise ValueError("Flow direction required for gap joining")
+             
+        return _join_stream_gaps_numba(
+            streams.astype(np.int8),
+            self.flow_dir.astype(np.int32),
+            self.codes, self.drs, self.dcs,
+            self.cellsize_x, self.cellsize_y,
+            gap_threshold
+        )
+
+    def snap_pour_points(self, points, flow_acc, snap_dist):
+        """Snap pour points to high accumulation cells.
+        
+        Args:
+            points (list): List of (x, y) tuples
+            flow_acc (np.ndarray): Flow accumulation raster
+            snap_dist (float): Snap distance in map units
+            
+        Returns:
+            list: List of snapped (x, y) tuples
+        """
+        snapped_points = []
+        
+        # Convert snap distance to pixels
+        radius_px = int(snap_dist / self.cellsize_x)
+        if radius_px < 1:
+            radius_px = 1
+            
+        rows, cols = flow_acc.shape
+        
+        for x, y in points:
+            if not hasattr(self, 'geotransform') or self.geotransform is None:
+                 # Cannot snap without geotransform to convert coords
+                 snapped_points.append((x, y))
+                 continue
+                 
+            c = int((x - self.geotransform[0]) / self.geotransform[1])
+            r = int((y - self.geotransform[3]) / self.geotransform[5])
+            
+            if 0 <= r < rows and 0 <= c < cols:
+                # Search window
+                r_min = max(0, r - radius_px)
+                r_max = min(rows, r + radius_px + 1)
+                c_min = max(0, c - radius_px)
+                c_max = min(cols, c + radius_px + 1)
+                
+                window = flow_acc[r_min:r_max, c_min:c_max]
+                
+                # Handle NaNs
+                if np.all(np.isnan(window)):
+                    snapped_points.append((x, y))
+                    continue
+                    
+                # Get local max index
+                try:
+                    max_idx = np.nanargmax(window)
+                    local_r, local_c = np.unravel_index(max_idx, window.shape)
+                    
+                    best_r = r_min + local_r
+                    best_c = c_min + local_c
+                    
+                    new_x = self.geotransform[0] + (best_c + 0.5) * self.geotransform[1]
+                    new_y = self.geotransform[3] + (best_r + 0.5) * self.geotransform[5]
+                    
+                    snapped_points.append((new_x, new_y))
+                except:
+                    snapped_points.append((x, y))
+            else:
+                snapped_points.append((x, y))
+                
+        return snapped_points
+
+    def remove_short_streams(self, flow_dir, streams, min_length):
+        """Remove stream links shorter than a threshold.
+        
+        Args:
+            flow_dir (np.ndarray): Flow direction raster
+            streams (np.ndarray): Stream raster (1/0 or IDs)
+            min_length (float): Minimum length in map units
+            
+        Returns:
+            np.ndarray: Cleaned stream raster
+        """
+        # 1. Assign Link IDs
+        link_ids = self.assign_stream_link_ids(flow_dir, streams)
+        
+        # 2. Calculate length of each link
+        lengths = _calculate_link_lengths_numba(
+            link_ids.astype(np.int32),
+            flow_dir.astype(np.int32),
+            self.codes, self.drs, self.dcs,
+            self.cellsize_x, self.cellsize_y
+        )
+        
+        # 3. Filter
+        return _filter_short_streams_numba(
+            link_ids.astype(np.int32),
+            lengths,
+            min_length
+        )
+
 @jit(nopython=True, cache=True)
+
 def _flow_distance_upstream_numba(flow_dir, codes, drs, dcs, cellsize_x, cellsize_y):
     """Calculate maximum upstream flow distance (Distance to Ridge)."""
     rows, cols = flow_dir.shape
@@ -1504,285 +1677,8 @@ def _flow_distance_to_outlet_numba(flow_dir, codes, drs, dcs, cellsize_x, cellsi
                 
     return dist
 
-    def delineate_basins(self, flow_dir):
-        """Delineate all drainage basins.
-        
-        Returns:
-            np.ndarray: Basin ID raster
-        """
-        return _delineate_basins_numba(
-            flow_dir.astype(np.int32),
-            self.codes, self.drs, self.dcs
-        )
-
-    def delineate_watersheds(self, seeds):
-        """Delineate watersheds from seed raster.
-        
-        Args:
-            seeds (np.ndarray): Raster with seed IDs (0 for non-seeds)
-            
-        Returns:
-            np.ndarray: Watershed ID raster
-        """
-        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
-             if not np.all(np.isnan(self.dem)):
-                 self.flow_dir = self.d8_flow_direction()
-             else:
-                 raise ValueError("Flow direction required for watershed delineation")
-                 
-        return _delineate_watersheds_numba(
-            self.flow_dir.astype(np.int32),
-            seeds.astype(np.int32),
-            self.codes, self.drs, self.dcs
-        )
-
-    def find_no_flow_cells(self):
-        """Identify cells with no flow direction.
-        
-        Returns:
-            np.ndarray: Binary mask (1=No Flow)
-        """
-        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
-             raise ValueError("Flow direction required")
-             
-        # D8 codes are > 0. 0 is usually sink/undefined.
-        return (self.flow_dir == 0).astype(np.int8)
-
-    def find_parallel_flow(self):
-        """Identify parallel flow patterns.
-        
-        Returns:
-            np.ndarray: Binary mask (1=Parallel Flow)
-        """
-        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
-             raise ValueError("Flow direction required")
-             
-        return _find_parallel_flow_numba(
-            self.flow_dir.astype(np.int32),
-            self.codes, self.drs, self.dcs
-        )
-
-    def assign_stream_link_ids(self, flow_dir, streams):
-        """Assign unique IDs to stream links.
-        
-        Args:
-            flow_dir (np.ndarray): Flow direction raster
-            streams (np.ndarray): Stream raster
-            
-        Returns:
-            np.ndarray: Stream link ID raster
-        """
-        return _assign_stream_link_ids_numba(
-            flow_dir.astype(np.int32),
-            streams.astype(np.int32),
-            self.codes, self.drs, self.dcs
-        )
-
-    def assign_tributary_ids(self, flow_dir, streams):
-        """Assign unique IDs to tributaries.
-        
-        Returns:
-            np.ndarray: Tributary ID raster
-        """
-        return self.assign_stream_link_ids(flow_dir, streams)
-
-    def join_stream_gaps(self, streams, gap_threshold):
-        """Join gaps in stream network (raster).
-        
-        Args:
-            streams (np.ndarray): Binary stream raster
-            gap_threshold (float): Max gap distance in map units
-            
-        Returns:
-            np.ndarray: Filled stream raster
-        """
-        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
-             raise ValueError("Flow direction required for gap joining")
-             
-        return _join_stream_gaps_numba(
-            streams.astype(np.int8),
-            self.flow_dir.astype(np.int32),
-            self.codes, self.drs, self.dcs,
-            self.cellsize_x, self.cellsize_y,
-            gap_threshold
-        )
-
-
-    def snap_pour_points(self, points, flow_acc, snap_dist):
-        """Snap pour points to high accumulation cells.
-        
-        Args:
-            points (list): List of (x, y) tuples
-            flow_acc (np.ndarray): Flow accumulation raster
-            snap_dist (float): Snap distance in map units
-            
-        Returns:
-            list: List of snapped (x, y) tuples
-        """
-        snapped_points = []
-        
-        # Convert snap distance to pixels
-        radius_px = int(snap_dist / self.cellsize_x)
-        if radius_px < 1:
-            radius_px = 1
-            
-        rows, cols = flow_acc.shape
-        
-        for x, y in points:
-            # Convert to row, col
-            c = int((x - self.geotransform[0]) / self.geotransform[1]) if hasattr(self, 'geotransform') else int(x / self.cellsize_x) # Fallback if geotransform missing
-            r = int((y - self.geotransform[3]) / self.geotransform[5]) if hasattr(self, 'geotransform') else int(y / self.cellsize_y)
-            
-            # Use simple logic if geotransform is missing or just assume it's there
-            # The original code used self.geotransform, so let's assume it's there or handle it.
-            # But FlowRouter doesn't usually have geotransform.
-            # Let's use the original logic but wrapped in try/except or check.
-            
-            if not hasattr(self, 'geotransform'):
-                 # Cannot snap without geotransform to convert coords
-                 snapped_points.append((x, y))
-                 continue
-                 
-            c = int((x - self.geotransform[0]) / self.geotransform[1])
-            r = int((y - self.geotransform[3]) / self.geotransform[5])
-            
-            if 0 <= r < rows and 0 <= c < cols:
-                # Search window
-                r_min = max(0, r - radius_px)
-                r_max = min(rows, r + radius_px + 1)
-                c_min = max(0, c - radius_px)
-                c_max = min(cols, c + radius_px + 1)
-                
-                window = flow_acc[r_min:r_max, c_min:c_max]
-                
-                # Handle NaNs
-                if np.all(np.isnan(window)):
-                    snapped_points.append((x, y))
-                    continue
-                    
-                # Get local max index
-                try:
-                    max_idx = np.nanargmax(window)
-                    local_r, local_c = np.unravel_index(max_idx, window.shape)
-                    
-                    best_r = r_min + local_r
-                    best_c = c_min + local_c
-                    
-                    new_x = self.geotransform[0] + (best_c + 0.5) * self.geotransform[1]
-                    new_y = self.geotransform[3] + (best_r + 0.5) * self.geotransform[5]
-                    
-                    snapped_points.append((new_x, new_y))
-                except:
-                    snapped_points.append((x, y))
-            else:
-                snapped_points.append((x, y))
-                
-        return snapped_points
-
-    def remove_short_streams(self, flow_dir, streams, min_length):
-        """Remove stream links shorter than a threshold.
-        
-        Args:
-            flow_dir (np.ndarray): Flow direction raster
-            streams (np.ndarray): Stream raster (1/0 or IDs)
-            min_length (float): Minimum length in map units
-            
-        Returns:
-            np.ndarray: Cleaned stream raster
-        """
-        # 1. Assign Link IDs
-        link_ids = self.assign_stream_link_ids(flow_dir, streams)
-        
-        # 2. Calculate length of each link
-        lengths = _calculate_link_lengths_numba(
-            link_ids.astype(np.int32),
-            flow_dir.astype(np.int32),
-            self.codes, self.drs, self.dcs,
-            self.cellsize_x, self.cellsize_y
-        )
-        
-        # 3. Filter
-        return _filter_short_streams_numba(
-            link_ids.astype(np.int32),
-            lengths,
-            min_length
-        )
-
-    def extract_stream_segments(self, streams):
-        """Extract stream segments as list of point lists.
-        
-        Args:
-            streams (np.ndarray): Stream raster
-            
-        Returns:
-            list: List of segments, where each segment is a list of (x, y) tuples
-        """
-        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
-             if not np.all(np.isnan(self.dem)):
-                 self.flow_dir = self.d8_flow_direction()
-             else:
-                 raise ValueError("Flow direction required for stream extraction")
-                 
-        link_ids = self.assign_stream_link_ids(self.flow_dir, streams)
-        
-        segments = []
-        unique_links = np.unique(link_ids)
-        unique_links = unique_links[unique_links > 0]
-        
-        use_geo = hasattr(self, 'geotransform') and self.geotransform is not None
-        
-        for link_id in unique_links:
-            mask = (link_ids == link_id)
-            cells = np.argwhere(mask)
-            
-            if len(cells) == 0:
-                continue
-            
-            # Build mini-graph
-            link_cells_set = set((r, c) for r, c in cells)
-            downstream_map = {}
-            upstream_count = {tuple(c): 0 for c in cells}
-            
-            for r, c in cells:
-                d = self.flow_dir[r, c]
-                if d > 0:
-                    for i in range(8):
-                        if d == self.codes[i]:
-                            nr, nc = r + self.drs[i], c + self.dcs[i]
-                            if (nr, nc) in link_cells_set:
-                                downstream_map[(r, c)] = (nr, nc)
-                                upstream_count[(nr, nc)] += 1
-                            break
-            
-            # Find start node
-            start_nodes = [n for n, count in upstream_count.items() if count == 0]
-            
-            if not start_nodes:
-                curr = tuple(cells[0])
-            else:
-                curr = start_nodes[0]
-                
-            # Trace
-            segment = []
-            while True:
-                if use_geo:
-                    x = self.geotransform[0] + (curr[1] + 0.5) * self.geotransform[1]
-                    y = self.geotransform[3] + (curr[0] + 0.5) * self.geotransform[5]
-                else:
-                    x, y = float(curr[1]), float(curr[0])
-                    
-                segment.append((x, y))
-                
-                if curr in downstream_map:
-                    curr = downstream_map[curr]
-                else:
-                    break
-            
-            segments.append(segment)
-            
-        return segments
-
 @jit(nopython=True, cache=True)
+
 def _delineate_basins_numba(flow_dir, codes, drs, dcs):
     """Delineate basins for all outlets."""
     rows, cols = flow_dir.shape

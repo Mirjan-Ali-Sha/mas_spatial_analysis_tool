@@ -194,13 +194,6 @@ class SlopeAlgorithm(QgsProcessingAlgorithm):
                             context.setLayersToLoadOnCompletion({})
                         else:
                             feedback.pushInfo('Warning: Could not load styled layer')
-                    else:
-                        # Just save .qml for future use
-                        temp_layer = QgsRasterLayer(output_path, 'temp_for_style')
-                        if temp_layer.isValid():
-                            apply_slope_symbology(temp_layer)
-                            temp_layer.saveDefaultStyle()
-                            feedback.pushInfo('Slope .qml style file saved')
                             
                 except Exception as e:
                     feedback.pushInfo(f'Note: Could not apply symbology: {e}')
@@ -369,13 +362,6 @@ class AspectAlgorithm(QgsProcessingAlgorithm):
                             context.setLayersToLoadOnCompletion({})
                         else:
                             feedback.pushInfo('Warning: Could not load styled layer')
-                    else:
-                        # Just save .qml for future use
-                        temp_layer = QgsRasterLayer(output_path, 'temp_for_style')
-                        if temp_layer.isValid():
-                            apply_aspect_symbology(temp_layer)
-                            temp_layer.saveDefaultStyle()
-                            feedback.pushInfo('Aspect .qml style file saved')
                             
                 except Exception as e:
                     feedback.pushInfo(f'Note: Could not apply symbology: {e}')

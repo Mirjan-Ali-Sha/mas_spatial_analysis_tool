@@ -173,10 +173,8 @@ class StreamOrderingAlgorithm(QgsProcessingAlgorithm):
                         apply_stream_order_symbology(styled_layer)
                         feedback.pushInfo('Stream Order symbology applied (color palette)')
                         
-                        # Save .qml style file for future use
-                        styled_layer.saveDefaultStyle()
-                        
                         # Add to project
+
                         QgsProject.instance().addMapLayer(styled_layer)
                         feedback.pushInfo('Styled layer added to project')
                         
@@ -184,14 +182,8 @@ class StreamOrderingAlgorithm(QgsProcessingAlgorithm):
                         context.setLayersToLoadOnCompletion({})
                     else:
                         feedback.pushWarning('Could not load styled layer')
-                else:
-                    # Just save .qml for future use
-                    temp_layer = QgsRasterLayer(output_path, 'temp_for_style')
-                    if temp_layer.isValid():
-                        apply_stream_order_symbology(temp_layer)
-                        temp_layer.saveDefaultStyle()
-                        feedback.pushInfo('Stream Order .qml style file saved')
                         
+
             except Exception as e:
                 feedback.pushWarning(f'Could not apply symbology: {str(e)}')
             
