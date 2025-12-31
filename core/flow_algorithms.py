@@ -1157,6 +1157,9 @@ class FlowRouter:
     def extract_stream_segments(self, streams):
         """Extract stream segments as list of polylines.
         
+        Traces from headwater cells (no upstream) downstream to create
+        continuous vector lines.
+        
         Args:
             streams (np.ndarray): Stream raster (stream order values or binary)
             
@@ -1164,93 +1167,129 @@ class FlowRouter:
             list: List of (segment_points, stream_order) tuples
                   where segment_points is list of (x, y) tuples
         """
-        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
-             if not np.all(np.isnan(self.dem)):
-                 self.flow_dir = self.d8_flow_direction()
-             else:
-                 raise ValueError("Flow direction required for stream extraction")
-        
         rows, cols = streams.shape
-        flow_dir = self.flow_dir
         
-        # Find all stream cells and their order values
-        stream_cells = []
+        # Get flow direction if available
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+            if hasattr(self, 'dem') and not np.all(np.isnan(self.dem)):
+                self.flow_dir = self.d8_flow_direction()
+            else:
+                raise ValueError("Flow direction required for stream extraction")
+        
+        flow_dir = self.flow_dir
+        use_geo = hasattr(self, 'geotransform') and self.geotransform is not None
+        
+        def get_coords(r, c):
+            if use_geo:
+                x = self.geotransform[0] + (c + 0.5) * self.geotransform[1]
+                y = self.geotransform[3] + (r + 0.5) * self.geotransform[5]
+            else:
+                x, y = float(c), float(r)
+            return (x, y)
+        
+        # Find all stream cells
+        stream_cells = set()
         for r in range(rows):
             for c in range(cols):
                 if streams[r, c] > 0 and not np.isnan(streams[r, c]):
-                    stream_cells.append((r, c, int(streams[r, c])))
+                    stream_cells.add((r, c))
         
         if not stream_cells:
             return []
         
-        # Build downstream map for stream cells only
-        stream_set = set((r, c) for r, c, _ in stream_cells)
-        downstream_map = {}
-        has_upstream = set()
+        # Build downstream map: for each stream cell, where does it flow?
+        downstream = {}
+        upstream_count = {}
         
-        for r, c, order in stream_cells:
+        for (r, c) in stream_cells:
+            upstream_count[(r, c)] = 0
+        
+        for (r, c) in stream_cells:
             d = flow_dir[r, c]
             if d > 0:
                 for i in range(8):
                     if d == self.codes[i]:
                         nr, nc = r + self.drs[i], c + self.dcs[i]
-                        if (nr, nc) in stream_set:
-                            downstream_map[(r, c)] = (nr, nc)
-                            has_upstream.add((nr, nc))
+                        if (nr, nc) in stream_cells:
+                            downstream[(r, c)] = (nr, nc)
+                            upstream_count[(nr, nc)] = upstream_count.get((nr, nc), 0) + 1
                         break
         
-        # Find source cells (stream cells with no upstream)
-        source_cells = [(r, c, order) for r, c, order in stream_cells if (r, c) not in has_upstream]
+        # Find headwater cells (no upstream within stream network)
+        headwaters = [(r, c) for (r, c) in stream_cells if upstream_count.get((r, c), 0) == 0]
         
-        use_geo = hasattr(self, 'geotransform') and self.geotransform is not None
+        # Also add cells that have no upstream but are stream cells
+        # (handles isolated segments)
+        
         segments = []
         visited = set()
         
-        # Trace from each source cell
-        for start_r, start_c, start_order in source_cells:
+        # Trace from each headwater downstream
+        for start_r, start_c in headwaters:
             if (start_r, start_c) in visited:
                 continue
             
-            segment = []
+            segment_pts = []
             curr = (start_r, start_c)
-            curr_order = start_order
+            order = int(streams[start_r, start_c])
             
             while curr is not None and curr not in visited:
-                visited.add(curr)
                 r, c = curr
+                visited.add(curr)
+                segment_pts.append(get_coords(r, c))
                 
-                # Get coordinates
-                if use_geo:
-                    x = self.geotransform[0] + (c + 0.5) * self.geotransform[1]
-                    y = self.geotransform[3] + (r + 0.5) * self.geotransform[5]
-                else:
-                    x, y = float(c), float(r)
-                
-                segment.append((x, y))
-                
-                # Move downstream
-                next_cell = downstream_map.get(curr)
+                # Get downstream cell
+                next_cell = downstream.get(curr)
                 
                 if next_cell is not None:
-                    # Check if stream order changes (junction)
                     nr, nc = next_cell
                     next_order = int(streams[nr, nc])
                     
-                    if next_order != curr_order and len(segment) >= 2:
-                        # Save current segment and start new one
-                        segments.append((segment, curr_order))
-                        segment = [(x, y)]  # Start new segment from current point
-                        curr_order = next_order
-                    
-                    curr = next_cell
-                else:
-                    curr = None
+                    # If order changes (junction), save segment and start new
+                    if next_order != order and len(segment_pts) >= 2:
+                        segments.append((segment_pts, order))
+                        segment_pts = [get_coords(r, c)]  # overlap one point
+                        order = next_order
+                
+                curr = next_cell
             
-            # Save final segment
-            if len(segment) >= 2:
-                segments.append((segment, curr_order))
+            if len(segment_pts) >= 2:
+                segments.append((segment_pts, order))
+        
+        # Handle any remaining unvisited stream cells (isolated loops/segments)
+        for (r, c) in stream_cells:
+            if (r, c) not in visited:
+                # Single cell or small isolated segment
+                segment_pts = [get_coords(r, c)]
+                visited.add((r, c))
+                
+                # Try to trace using 8-connectivity
+                curr = (r, c)
+                order = int(streams[r, c])
+                
+                while True:
+                    found_next = False
+                    for dr in [-1, 0, 1]:
+                        for dc in [-1, 0, 1]:
+                            if dr == 0 and dc == 0:
+                                continue
+                            nr, nc = curr[0] + dr, curr[1] + dc
+                            if (nr, nc) in stream_cells and (nr, nc) not in visited:
+                                visited.add((nr, nc))
+                                segment_pts.append(get_coords(nr, nc))
+                                curr = (nr, nc)
+                                found_next = True
+                                break
+                        if found_next:
+                            break
+                    if not found_next:
+                        break
+                
+                if len(segment_pts) >= 2:
+                    segments.append((segment_pts, order))
         
         return segments
+
 
     def delineate_basins(self, flow_dir):
         """Delineate all drainage basins.
@@ -1430,7 +1469,39 @@ class FlowRouter:
             min_length
         )
 
+    def remove_isolated_streams(self, streams, flow_acc, min_outlet_acc=None):
+        """Remove isolated stream segments not connected to main drainage network.
+        
+        Args:
+            streams (np.ndarray): Stream raster (1/0)
+            flow_acc (np.ndarray): Flow accumulation raster (used to identify main channels)
+            min_outlet_acc (float): Minimum accumulation to consider as part of main network.
+                                   If None, uses 10th percentile of stream accumulation values.
+            
+        Returns:
+            np.ndarray: Cleaned stream raster with only connected streams
+        """
+        if not hasattr(self, 'flow_dir') or self.flow_dir is None:
+            raise ValueError("Flow direction required for removing isolated streams")
+        
+        # Auto-calculate threshold if not provided
+        if min_outlet_acc is None:
+            stream_acc = flow_acc[streams > 0]
+            if len(stream_acc) > 0:
+                min_outlet_acc = np.percentile(stream_acc, 10)  # Keep streams connected to at least 10th percentile
+            else:
+                return streams  # No streams to process
+        
+        return _remove_isolated_streams_numba(
+            streams.astype(np.int8),
+            self.flow_dir.astype(np.int32),
+            flow_acc.astype(np.float64),
+            self.codes, self.drs, self.dcs,
+            float(min_outlet_acc)
+        )
+
 @jit(nopython=True, cache=True)
+
 
 def _flow_distance_upstream_numba(flow_dir, codes, drs, dcs, cellsize_x, cellsize_y):
     """Calculate maximum upstream flow distance (Distance to Ridge)."""
@@ -2519,4 +2590,151 @@ def _join_stream_gaps_numba(streams, flow_dir, codes, drs, dcs, cellsize_x, cell
                             filled_streams[path_r[k], path_c[k]] = 1
                             
     return filled_streams
+
+
+@jit(nopython=True, cache=True)
+def _calculate_link_lengths_numba(link_ids, flow_dir, codes, drs, dcs, cellsize_x, cellsize_y):
+    """Calculate length of each stream link in map units."""
+    rows, cols = link_ids.shape
+    max_id = np.max(link_ids)
+    
+    # Initialize lengths array
+    lengths = np.zeros(max_id + 1, dtype=np.float64)
+    
+    diag_dist = np.sqrt(cellsize_x**2 + cellsize_y**2)
+    
+    for r in range(rows):
+        for c in range(cols):
+            lid = link_ids[r, c]
+            if lid > 0:
+                d = flow_dir[r, c]
+                if d > 0:
+                    for i in range(8):
+                        if d == codes[i]:
+                            nr, nc = r + drs[i], c + dcs[i]
+                            if 0 <= nr < rows and 0 <= nc < cols:
+                                # Check if downstream is same link
+                                if link_ids[nr, nc] == lid:
+                                    step = diag_dist if (drs[i] != 0 and dcs[i] != 0) else cellsize_x
+                                    lengths[lid] += step
+                            break
+    
+    return lengths
+
+
+@jit(nopython=True, cache=True)
+def _filter_short_streams_numba(link_ids, lengths, min_length):
+    """Remove stream links shorter than min_length."""
+    rows, cols = link_ids.shape
+    result = np.zeros((rows, cols), dtype=np.int8)
+    
+    for r in range(rows):
+        for c in range(cols):
+            lid = link_ids[r, c]
+            if lid > 0:
+                if lengths[lid] >= min_length:
+                    result[r, c] = 1
+    
+    return result
+
+
+@jit(nopython=True, cache=True)
+def _find_main_network_numba(streams, flow_dir, codes, drs, dcs):
+    """Find cells connected to the main drainage network (flows to outlet).
+    
+    The main network consists of streams that eventually reach an outlet
+    (edge of raster or sink). Isolated loops or disconnected segments are excluded.
+    """
+    rows, cols = streams.shape
+    connected = np.zeros((rows, cols), dtype=np.int8)
+    
+    # Trace each stream cell downstream to see if it reaches an outlet
+    for r in range(rows):
+        for c in range(cols):
+            if streams[r, c] > 0:
+                curr_r, curr_c = r, c
+                path_length = 0
+                max_path = rows + cols  # Reasonable max path to prevent infinite loops
+                reaches_outlet = False
+                
+                while path_length < max_path:
+
+                    path_length += 1
+                    d = flow_dir[curr_r, curr_c]
+                    
+                    if d <= 0:
+                        # Sink - consider it an outlet
+                        reaches_outlet = True
+                        break
+                    
+                    next_r, next_c = -1, -1
+                    for i in range(8):
+                        if d == codes[i]:
+                            next_r = curr_r + drs[i]
+                            next_c = curr_c + dcs[i]
+                            break
+                    
+                    if next_r < 0 or next_r >= rows or next_c < 0 or next_c >= cols:
+                        # Flows off edge - outlet
+                        reaches_outlet = True
+                        break
+                    
+                    # Continue tracing
+                    curr_r, curr_c = next_r, next_c
+                
+                if reaches_outlet:
+                    connected[r, c] = 1
+    
+    return connected
+
+
+@jit(nopython=True, cache=True)
+def _remove_isolated_streams_numba(streams, flow_dir, flow_acc, codes, drs, dcs, min_outlet_acc):
+    """Remove isolated stream segments not connected to main network.
+    
+    Strategy: Keep streams that trace downstream to a high-accumulation "outlet"
+    (cells with accumulation >= min_outlet_acc), indicating they're part of 
+    the main drainage network.
+    """
+    rows, cols = streams.shape
+    result = np.zeros((rows, cols), dtype=np.int8)
+    
+    for r in range(rows):
+        for c in range(cols):
+            if streams[r, c] > 0:
+                curr_r, curr_c = r, c
+                path_length = 0
+                max_path = rows + cols  # Max reasonable path
+                is_connected = False
+                
+                while path_length < max_path:
+                    path_length += 1
+                    
+                    # Check if current cell has high enough accumulation
+                    if flow_acc[curr_r, curr_c] >= min_outlet_acc:
+                        is_connected = True
+                        break
+                    
+                    d = flow_dir[curr_r, curr_c]
+                    if d <= 0:
+                        break  # Sink
+                    
+                    next_r, next_c = -1, -1
+                    for i in range(8):
+                        if d == codes[i]:
+                            next_r = curr_r + drs[i]
+                            next_c = curr_c + dcs[i]
+                            break
+                    
+                    if next_r < 0 or next_r >= rows or next_c < 0 or next_c >= cols:
+                        # Flows off edge - connected to outlet
+                        is_connected = True
+                        break
+                    
+                    curr_r, curr_c = next_r, next_c
+                
+                if is_connected:
+                    result[r, c] = 1
+    
+    return result
 
